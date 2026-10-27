@@ -21,6 +21,10 @@
   ],
   "services": [{ "binding": "DATASET", "service": "travis-oracle-explorer", "remote": true }],
   "ai": { "binding": "AI" },
+  "ratelimits": [
+    { "name": "AGENT_LIMITER", "namespace_id": "1001", "simple": { "limit": 20, "period": 60 } },
+    { "name": "WRITE_LIMITER", "namespace_id": "1002", "simple": { "limit": 60, "period": 60 } }
+  ],
   "observability": { "enabled": true },
   "vars": {
     "AGENT_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",

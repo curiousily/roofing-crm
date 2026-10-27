@@ -1,5 +1,10 @@
 const COUNT = new Intl.NumberFormat("en-US");
 const DECIMAL = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+const MEASURE = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+const COORDINATE_DECIMALS = 6;
+const COORDINATE_COLUMN = /(^|_)(latitude|longitude)$/;
+const VERBATIM_COLUMN = /(^|_)(id|year|year_built|zip|number|issued)$/;
+const CODED_VALUE = /^[a-z]+(_[a-z0-9]+)+$/;
 const DATE_TIME = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -54,11 +59,15 @@ export function shortCid(cid: string): string {
     : cid;
 }
 
-export function formatValue(value: unknown): string {
+export function formatValue(value: unknown, column = ""): string {
   if (value === null || value === undefined) return "";
-  if (typeof value === "number")
-    return Number.isInteger(value) ? COUNT.format(value) : DECIMAL.format(value);
-  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "number") {
+    if (COORDINATE_COLUMN.test(column)) return value.toFixed(COORDINATE_DECIMALS);
+    if (VERBATIM_COLUMN.test(column)) return String(value);
+    return Number.isInteger(value) ? COUNT.format(value) : MEASURE.format(value);
+  }
+  if (Array.isArray(value)) return value.map((item) => formatValue(item)).join(", ");
   if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  const text = String(value);
+  return CODED_VALUE.test(text) ? text.replaceAll("_", " ") : text;
 }

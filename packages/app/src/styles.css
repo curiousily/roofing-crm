@@ -981,6 +981,12 @@ legend {
   background: #7048e8;
 }
 
+.dot.area {
+  width: 14px;
+  height: 14px;
+  background: rgb(232 89 12 / 22%);
+}
+
 .dot.saved {
   background: transparent;
   border: 3px solid #2b8a3e;

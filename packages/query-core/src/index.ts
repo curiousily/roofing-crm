@@ -3,6 +3,8 @@ export { findPlace, ToolInputError } from "./places-lookup.js";
 export type { Center } from "./sql.js";
 export {
   type DatasetInfo,
+  type DensityCell,
+  matchDensity,
   type Row,
   runTool,
   type SqlRunner,

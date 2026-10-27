@@ -59,8 +59,9 @@ const NEURONS_WHEN_UNREPORTED = 25;
 const SECONDS_PER_DAY = 86_400;
 const CACHE_TTL_SECONDS = 7 * SECONDS_PER_DAY;
 const BUDGET_TTL_SECONDS = 2 * SECONDS_PER_DAY;
-const CACHE_KEY_VERSION = "agent:v1";
-const THINKING = /<think>[\s\S]*?<\/think>/g;
+const CACHE_KEY_VERSION = "agent:v2";
+const MARKUP_BLOCKS = /<(think|search|tool_call|function_call|tool_response)>[\s\S]*?<\/\1>/g;
+const STRAY_TAGS = /<\/?[a-z_]+>/g;
 
 const HttpStatus = {
   BadRequest: 400,
@@ -112,7 +113,10 @@ export class AgentRoute {
     const { messages } = parsed.data;
     const { modelName, dailyNeurons, store } = this.config;
 
-    const cacheKey = `${CACHE_KEY_VERSION}:${await sha256(JSON.stringify({ modelName, messages }))}`;
+    const { systemPrompt, tools } = this.config;
+    const cacheKey = `${CACHE_KEY_VERSION}:${await sha256(
+      JSON.stringify({ modelName, systemPrompt, tools, messages }),
+    )}`;
     const used = await this.neuronsUsed();
     const cached = await store.get(cacheKey);
     if (cached) {
@@ -151,7 +155,7 @@ export class AgentRoute {
 
     const reply = completion.choices[0]?.message;
     const message = {
-      content: (reply?.content ?? "").replace(THINKING, "").trim(),
+      content: (reply?.content ?? "").replace(MARKUP_BLOCKS, "").replace(STRAY_TAGS, "").trim(),
       tool_calls: reply?.tool_calls ?? [],
     };
     const neurons = completion.usage?.neurons ?? NEURONS_WHEN_UNREPORTED;

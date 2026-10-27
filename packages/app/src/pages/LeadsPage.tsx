@@ -294,6 +294,7 @@ function LeadTable({
 function LeadDetail({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const { api, update, remove } = useLeads();
   const [notes, setNotes] = useState(lead.notes);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
   const [error, setError] = useState<string>();
 
@@ -325,16 +326,35 @@ function LeadDetail({ lead, onClose }: { lead: Lead; onClose: () => void }) {
           <button type="button" className="button secondary" onClick={onClose}>
             Close
           </button>
-          <button
-            type="button"
-            className="button danger"
-            onClick={async () => {
-              await remove(lead.id);
-              onClose();
-            }}
-          >
-            Delete
-          </button>
+          {confirmingDelete ? (
+            <>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setConfirmingDelete(false)}
+              >
+                Keep
+              </button>
+              <button
+                type="button"
+                className="button danger"
+                onClick={async () => {
+                  await remove(lead.id);
+                  onClose();
+                }}
+              >
+                Delete for good
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="button danger"
+              onClick={() => setConfirmingDelete(true)}
+            >
+              Delete
+            </button>
+          )}
         </>
       }
     >

@@ -47,6 +47,8 @@ export interface AgentOutcome {
 }
 
 const MAX_MODEL_CALLS = 6;
+const HISTORY_MESSAGES = 16;
+const MAX_CONVERSATION_MESSAGES = 40;
 const ROWS_FOR_MODEL = 10;
 const RELATED_ROWS_FOR_MODEL = 5;
 const HIDDEN_FROM_MODEL = new Set(["latitude", "longitude", "source_run_id"]);
@@ -56,7 +58,7 @@ export async function askAgent(
   history: readonly ChatMessage[],
   { backend, tools, onEvent }: AgentDependencies,
 ): Promise<AgentOutcome> {
-  const messages: ChatMessage[] = [...history, { role: "user", content: question }];
+  const messages: ChatMessage[] = [...recentHistory(history), { role: "user", content: question }];
   const evidence: ToolResult[] = [];
   let neurons = 0;
 
@@ -83,7 +85,11 @@ export async function askAgent(
     }
   };
 
-  for (let call = 0; call < MAX_MODEL_CALLS; call += 1) {
+  for (
+    let call = 0;
+    call < MAX_MODEL_CALLS && messages.length <= MAX_CONVERSATION_MESSAGES;
+    call += 1
+  ) {
     const reply = await backend.next(messages);
     neurons += reply.neurons;
     const { content, tool_calls: toolCalls } = reply.message;
@@ -105,11 +111,19 @@ export async function askAgent(
   return { answer, messages, evidence, neurons };
 }
 
+function recentHistory(history: readonly ChatMessage[]): ChatMessage[] {
+  const start = history.findIndex(
+    (message, index) => message.role === "user" && history.length - index <= HISTORY_MESSAGES,
+  );
+  return start === -1 ? [] : history.slice(start);
+}
+
 function forModel(result: ToolResult): unknown {
   const hidden = result.rows.length - ROWS_FOR_MODEL;
   return {
     tool: result.tool,
     totalMatches: result.totalMatches,
+    summary: result.summary,
     center: result.center,
     rows: result.rows.slice(0, ROWS_FOR_MODEL).map(essentials),
     note:
@@ -121,8 +135,6 @@ function forModel(result: ToolResult): unknown {
 
 function essentials(row: Row): Row {
   return Object.fromEntries(
-    Object.entries(row).filter(
-      ([column, value]) => value !== null && value !== undefined && !HIDDEN_FROM_MODEL.has(column),
-    ),
+    Object.entries(row).filter(([column]) => !HIDDEN_FROM_MODEL.has(column)),
   );
 }

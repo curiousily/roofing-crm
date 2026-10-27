@@ -93,6 +93,43 @@ describe("mergeLead", () => {
     expect(activities.map((activity) => activity.kind)).toEqual([ActivityKind.SignalAdded]);
   });
 
+  it("raises the priority when the new signal warrants it, but never lowers it", () => {
+    const young = newLead(
+      "lead-1",
+      "workspace-1",
+      { ...agedRoof, roofAgeYears: 17, roofAgeConfidence: "low" },
+      NOW,
+    ).lead;
+
+    expect(young.priority).toBe(LeadPriority.Medium);
+    expect(mergeLead(young, openPermit, LATER).lead.priority).toBe(LeadPriority.High);
+    expect(
+      mergeLead({ ...lead(), priority: LeadPriority.High }, { ...openPermit, yearsOpen: 1 }, LATER)
+        .lead.priority,
+    ).toBe(LeadPriority.High);
+  });
+
+  it("records another open permit on the same property and keeps the longest-open one", () => {
+    const withPermit = mergeLead(lead(), openPermit, LATER).lead;
+
+    const shorter = mergeLead(
+      withPermit,
+      { ...openPermit, permitNumber: "2015-1 BP", yearsOpen: 11 },
+      LATER,
+    );
+    const longer = mergeLead(
+      withPermit,
+      { ...openPermit, permitNumber: "2001-9 BP", yearsOpen: 25 },
+      LATER,
+    );
+
+    expect(shorter.lead.permitNumber).toBe("2007-105523 BP");
+    expect(shorter.activities.map((activity) => [activity.kind, activity.detail])).toEqual([
+      [ActivityKind.PermitAdded, "2015-1 BP (open 11 years)"],
+    ]);
+    expect(longer.lead).toMatchObject({ permitNumber: "2001-9 BP", yearsOpen: 25 });
+  });
+
   it("changes nothing when the same signal is added again", () => {
     const { lead: merged, activities } = mergeLead(lead(), agedRoof, LATER);
 

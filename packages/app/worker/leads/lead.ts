@@ -21,6 +21,7 @@ export enum LeadPriority {
 export enum ActivityKind {
   Created = "created",
   SignalAdded = "signal_added",
+  PermitAdded = "permit_added",
   StatusChanged = "status_changed",
   PriorityChanged = "priority_changed",
   NotesUpdated = "notes_updated",
@@ -108,6 +109,14 @@ const HIGH_PRIORITY_YEARS_OPEN = 5;
 const WELL_EVIDENCED_ROOF_AGE = new Set(["high", "medium"]);
 const EARTH_RADIUS_MILES = 3958.8;
 const CLEARED = "cleared";
+const PRIORITY_ORDER = [LeadPriority.Low, LeadPriority.Medium, LeadPriority.High];
+const PERMIT_FIELDS: (keyof LeadFacts)[] = [
+  "permitNumber",
+  "permitState",
+  "yearsOpen",
+  "contractorName",
+  "bbbRating",
+];
 
 const FACT_FIELDS: (keyof LeadFacts)[] = [
   "propId",
@@ -154,16 +163,40 @@ export function newLead(
 }
 
 export function mergeLead(existing: Lead, input: NewLeadInput, now: string): LeadChange {
-  if (existing.signals.includes(input.signal)) return { lead: existing, activities: [] };
+  const anotherPermit =
+    input.signal === LeadSignal.OpenPermit &&
+    input.permitNumber !== undefined &&
+    existing.permitNumber !== undefined &&
+    input.permitNumber !== existing.permitNumber;
+  if (existing.signals.includes(input.signal) && !anotherPermit) {
+    return { lead: existing, activities: [] };
+  }
+
+  if (anotherPermit) {
+    const longerOpen = (input.yearsOpen ?? 0) > (existing.yearsOpen ?? 0);
+    const permitFacts = longerOpen
+      ? Object.fromEntries(PERMIT_FIELDS.map((field) => [field, input[field]]))
+      : {};
+    const merged = { ...existing, ...permitFacts };
+    const lead: Lead = {
+      ...merged,
+      priority: higher(existing.priority, priorityOf(merged)),
+      updatedAt: now,
+    };
+    const detail = `${input.permitNumber} (open ${input.yearsOpen ?? "?"} years)`;
+    return { lead, activities: [activity(lead, ActivityKind.PermitAdded, detail, now)] };
+  }
+
   const missing = Object.fromEntries(
     FACT_FIELDS.filter((field) => existing[field] === undefined && input[field] !== undefined).map(
       (field) => [field, input[field]],
     ),
   );
+  const merged = { ...existing, ...missing };
   const lead: Lead = {
-    ...existing,
-    ...missing,
+    ...merged,
     signals: [...existing.signals, input.signal],
+    priority: higher(existing.priority, priorityOf(merged)),
     updatedAt: now,
   };
   return { lead, activities: [activity(lead, ActivityKind.SignalAdded, input.signal, now)] };
@@ -249,6 +282,10 @@ function priorityOf(facts: LeadFacts): LeadPriority {
     (facts.roofAgeYears ?? 0) >= HIGH_PRIORITY_ROOF_AGE_YEARS &&
     WELL_EVIDENCED_ROOF_AGE.has(facts.roofAgeConfidence ?? "");
   return longOpen || oldRoof ? LeadPriority.High : LeadPriority.Medium;
+}
+
+function higher(first: LeadPriority, second: LeadPriority): LeadPriority {
+  return PRIORITY_ORDER.indexOf(first) >= PRIORITY_ORDER.indexOf(second) ? first : second;
 }
 
 function activity(lead: Lead, kind: ActivityKind, detail: string, at: string): LeadActivity {

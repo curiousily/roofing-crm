@@ -89,7 +89,7 @@ export function ErrorNote({ message }: { message: string }) {
   );
 }
 
-export function Cell({ value }: { value: unknown }) {
+export function Cell({ value, column }: { value: unknown; column?: string }) {
   if (typeof value === "string" && URL_VALUE.test(value)) {
     return (
       <a href={value} target="_blank" rel="noreferrer">
@@ -97,7 +97,7 @@ export function Cell({ value }: { value: unknown }) {
       </a>
     );
   }
-  return <>{formatValue(value)}</>;
+  return <>{formatValue(value, column)}</>;
 }
 
 export function DataTable({
@@ -137,7 +137,7 @@ export function DataTable({
             >
               {shown.map((column) => (
                 <td key={column}>
-                  <Cell value={row[column]} />
+                  <Cell value={row[column]} column={column} />
                 </td>
               ))}
             </tr>

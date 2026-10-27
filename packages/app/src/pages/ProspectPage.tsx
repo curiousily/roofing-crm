@@ -1,15 +1,25 @@
-import { PLACES, type Row, runTool, type ToolResult } from "@travis-oracle/query-core";
+import {
+  type DensityCell,
+  matchDensity,
+  PLACES,
+  type Row,
+  runTool,
+  type ToolResult,
+} from "@travis-oracle/query-core";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge, Card, Cid, Disclosure, ErrorNote, Spinner } from "../components/ui.js";
 import type { Dataset } from "../data/dataset.js";
 import type { Database } from "../data/duckdb.js";
 import { formatCount, formatValue } from "../format.js";
+import { labelOf } from "../labels.js";
 import { leadFromPermit, leadFromProperty, withPropertyDetails } from "../leads/lead-input.js";
 import { permitKey, propertyKey, useLeads } from "../leads/leads-context.js";
+import { isInTravisCounty } from "../map/in-county.js";
 import {
   CandidateKind,
   type MapCandidate,
   type MapCenter,
+  type MapDensityCell,
   ProspectMap,
   type Selection,
 } from "../map/ProspectMap.js";
@@ -24,7 +34,8 @@ const MAX_CANDIDATES = 200;
 const DEFAULT_ROOF_AGE = 15;
 const DEFAULT_YEARS_OPEN = 5;
 const EARLIEST_PERMIT_YEAR = 1900;
-const SEARCH_AREA = { south: 29, north: 31, west: -99, east: -96 };
+const MILES_PER_DEGREE = 69;
+const DENSITY_CELLS_ACROSS = 25;
 const RELATED_COLUMNS = [
   "permit_number",
   "permit_state",
@@ -106,7 +117,10 @@ export function ProspectPage({ dataset, database }: { dataset: Dataset; database
   const [roofAge, setRoofAge] = useState(DEFAULT_ROOF_AGE);
   const [confidence, setConfidence] = useState<Confidence>("low");
   const [yearsOpen, setYearsOpen] = useState(DEFAULT_YEARS_OPEN);
-  const [includeExpired, setIncludeExpired] = useState(true);
+  const [includeExpired, setIncludeExpired] = useState(false);
+  const [includeAccessory, setIncludeAccessory] = useState(false);
+  const [withContractor, setWithContractor] = useState(false);
+  const [density, setDensity] = useState<MapDensityCell[]>([]);
   const [issuedSince, setIssuedSince] = useState<number>();
   const [showRoofs, setShowRoofs] = useState(true);
   const [showPermits, setShowPermits] = useState(true);
@@ -131,30 +145,35 @@ export function ProspectPage({ dataset, database }: { dataset: Dataset; database
       radius_miles: radius,
       limit: MAX_CANDIDATES,
     };
+    const roofInput = { ...near, min_roof_age_years: roofAge, min_confidence: confidence };
+    const permitInput = {
+      ...near,
+      min_years_open: yearsOpen,
+      include_expired: includeExpired,
+      include_accessory: includeAccessory,
+      with_contractor: withContractor,
+      ...(issuedSince && { issued_since_year: issuedSince }),
+    };
+    const cellDegrees = radius / MILES_PER_DEGREE / DENSITY_CELLS_ACROSS;
+    const cellsOf = (kind: CandidateKind, cells: DensityCell[]) =>
+      cells.map((cell) => ({ ...cell, kind }));
     setRunning(true);
     setError(undefined);
     setSelected(undefined);
     Promise.all([
-      runTool(
-        "find_aged_roofs",
-        { ...near, min_roof_age_years: roofAge, min_confidence: confidence },
-        context,
-      ),
-      runTool(
-        "find_open_roofing_permits",
-        {
-          ...near,
-          min_years_open: yearsOpen,
-          include_expired: includeExpired,
-          ...(issuedSince && { issued_since_year: issuedSince }),
-        },
-        context,
-      ),
+      runTool("find_aged_roofs", roofInput, context),
+      runTool("find_open_roofing_permits", permitInput, context),
+      matchDensity("find_aged_roofs", roofInput, context, cellDegrees),
+      matchDensity("find_open_roofing_permits", permitInput, context, cellDegrees),
     ]).then(
-      ([foundRoofs, foundPermits]) => {
+      ([foundRoofs, foundPermits, roofCells, permitCells]) => {
         if (!active) return;
         setRoofs(foundRoofs);
         setPermits(foundPermits);
+        setDensity([
+          ...cellsOf(CandidateKind.AgedRoof, roofCells),
+          ...cellsOf(CandidateKind.OpenPermit, permitCells),
+        ]);
         setRunning(false);
       },
       (failure: unknown) => {
@@ -166,7 +185,18 @@ export function ProspectPage({ dataset, database }: { dataset: Dataset; database
     return () => {
       active = false;
     };
-  }, [center, radius, roofAge, confidence, yearsOpen, includeExpired, issuedSince, context]);
+  }, [
+    center,
+    radius,
+    roofAge,
+    confidence,
+    yearsOpen,
+    includeExpired,
+    includeAccessory,
+    withContractor,
+    issuedSince,
+    context,
+  ]);
 
   const candidates: MapCandidate[] = useMemo(() => {
     const located = (kind: CandidateKind, rows: Row[], key: (row: Row) => string) =>
@@ -226,12 +256,8 @@ export function ProspectPage({ dataset, database }: { dataset: Dataset; database
   const locate = () =>
     navigator.geolocation.getCurrentPosition(
       ({ coords: { latitude, longitude } }) => {
-        const inside =
-          latitude >= SEARCH_AREA.south &&
-          latitude <= SEARCH_AREA.north &&
-          longitude >= SEARCH_AREA.west &&
-          longitude <= SEARCH_AREA.east;
-        if (inside) setCenter({ name: "My location", latitude, longitude });
+        if (isInTravisCounty(latitude, longitude))
+          setCenter({ name: "My location", latitude, longitude });
         else
           setError(
             `Your location (${latitude.toFixed(3)}, ${longitude.toFixed(3)}) is outside Travis County, so the search stays where it is.`,
@@ -347,7 +373,23 @@ export function ProspectPage({ dataset, database }: { dataset: Dataset; database
                   checked={includeExpired}
                   onChange={(event) => setIncludeExpired(event.target.checked)}
                 />
-                Include expired without final inspection
+                Also expired without a final inspection
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={withContractor}
+                  onChange={(event) => setWithContractor(event.target.checked)}
+                />
+                Only permits that list a contractor
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={includeAccessory}
+                  onChange={(event) => setIncludeAccessory(event.target.checked)}
+                />
+                Include accessory work (patio covers, sheds)
               </label>
               <label>
                 Issued in or after
@@ -370,6 +412,12 @@ export function ProspectPage({ dataset, database }: { dataset: Dataset; database
             center={center}
             radiusMiles={radius}
             candidates={candidates}
+            density={[
+              ...(showRoofs ? density.filter((cell) => cell.kind === CandidateKind.AgedRoof) : []),
+              ...(showPermits
+                ? density.filter((cell) => cell.kind === CandidateKind.OpenPermit)
+                : []),
+            ]}
             selected={selected}
             onPick={(picked) => setCenter({ ...picked, name: undefined })}
             onSelect={select}
@@ -383,6 +431,9 @@ export function ProspectPage({ dataset, database }: { dataset: Dataset; database
             </span>
             <span>
               <span className="dot saved" /> in your leads
+            </span>
+            <span>
+              <span className="dot area" /> all matches by area
             </span>
           </div>
         </div>
@@ -518,7 +569,7 @@ function CandidateTable({
               </td>
               {columns.map((column) => (
                 <td key={column.key}>
-                  {column.render ? column.render(row) : formatValue(row[column.key])}
+                  {column.render ? column.render(row) : formatValue(row[column.key], column.key)}
                 </td>
               ))}
             </tr>
@@ -636,8 +687,8 @@ function CandidateDetail({
               (field) => property[field] !== null && property[field] !== undefined,
             ).map((field) => (
               <div key={field}>
-                <dt>{field}</dt>
-                <dd>{formatValue(property[field])}</dd>
+                <dt>{labelOf(field)}</dt>
+                <dd>{formatValue(property[field], field)}</dd>
               </div>
             ))}
           </dl>

@@ -2,7 +2,7 @@ import { type Row, runTool, type ToolResult } from "@travis-oracle/query-core";
 import { useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { SEARCH_MY_LEADS, searchMyLeadsInput } from "../../worker/agent/crm-tools.js";
+import { SEARCH_MY_LEADS } from "../../worker/agent/crm-tools.js";
 import {
   type AgentEvent,
   type AgentReply,
@@ -10,16 +10,18 @@ import {
   type ChatMessage,
 } from "../agent/agent-loop.js";
 import { httpBackend } from "../agent/http-backend.js";
+import { searchMyLeads } from "../agent/my-leads-tool.js";
 import { Badge, Card, Cid, Disclosure, ErrorNote, Spinner } from "../components/ui.js";
 import type { Dataset } from "../data/dataset.js";
 import type { Database } from "../data/duckdb.js";
 import { formatCount, formatValue } from "../format.js";
+import { labelOf } from "../labels.js";
 import { leadFromPermit, leadFromProperty, withPropertyDetails } from "../leads/lead-input.js";
 import { permitKey, propertyKey, useLeads } from "../leads/leads-context.js";
 import { datasetInfo } from "./dataset-info.js";
 
 const EXAMPLES = [
-  "Show me open roofing permits older than five years within five miles of Pflugerville.",
+  "Show me open roofing permits older than five years within five miles of Rollingwood.",
   "Which properties within three miles of Manor have roofs older than 15 years?",
   "Which of my leads are still new, and what should I follow up on first?",
   "Find long-held properties near Lakeway owned for more than 20 years.",
@@ -87,23 +89,10 @@ export function AssistantPage({ dataset, database }: { dataset: Dataset; databas
   const updateLast = (change: (turn: Turn) => Turn) =>
     setTurns((current) => [...current.slice(0, -1), change(current.at(-1) as Turn)]);
 
-  const runCrmTool = async (name: string, input: unknown): Promise<ToolResult> => {
-    if (name !== SEARCH_MY_LEADS) return runTool(name, input, context);
-    const query = searchMyLeadsInput.parse(input ?? {});
-    const found = await leads.api.list({
-      statuses: query.status ? [query.status] : undefined,
-      signals: query.signal ? [query.signal] : undefined,
-      minRoofAgeYears: query.min_roof_age_years,
-      minYearsOpen: query.min_years_open,
-    });
-    return {
-      tool: SEARCH_MY_LEADS,
-      rows: found.slice(0, query.limit) as unknown as Row[],
-      totalMatches: found.length,
-      sql: "",
-      dataset: context.dataset,
-    };
-  };
+  const runCrmTool = (name: string, input: unknown): Promise<ToolResult> =>
+    name === SEARCH_MY_LEADS
+      ? searchMyLeads(input, leads.api, context.dataset)
+      : runTool(name, input, context);
 
   const ask = async (text: string) => {
     if (!text.trim() || busy) return;
@@ -302,7 +291,7 @@ function EventView({
               <tr>
                 {convertible && <th />}
                 {columns.map((column) => (
-                  <th key={column}>{column}</th>
+                  <th key={column}>{labelOf(column)}</th>
                 ))}
               </tr>
             </thead>
@@ -326,7 +315,7 @@ function EventView({
                     </td>
                   )}
                   {columns.map((column) => (
-                    <td key={column}>{formatValue(row[column])}</td>
+                    <td key={column}>{formatValue(row[column], column)}</td>
                   ))}
                 </tr>
               ))}

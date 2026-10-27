@@ -26,6 +26,13 @@ export interface MapCandidate {
   saved: boolean;
 }
 
+export interface MapDensityCell {
+  kind: CandidateKind;
+  latitude: number;
+  longitude: number;
+  matches: number;
+}
+
 export interface MapCenter {
   latitude: number;
   longitude: number;
@@ -49,9 +56,14 @@ const COLORS = {
   county: "#495057",
 };
 const NOTHING_SELECTED = "";
+const DENSITY_COLORS: [CandidateKind, string][] = [
+  [CandidateKind.AgedRoof, "232, 89, 12"],
+  [CandidateKind.OpenPermit, "112, 72, 232"],
+];
 
 enum Layer {
   County = "county",
+  Density = "density",
   RadiusFill = "radius-fill",
   RadiusLine = "radius-line",
   Candidates = "candidates",
@@ -61,6 +73,7 @@ enum Layer {
 
 enum Source {
   County = "county",
+  Density = "density",
   Radius = "radius",
   Candidates = "candidates",
   Center = "center",
@@ -79,6 +92,7 @@ export function ProspectMap({
   center,
   radiusMiles,
   candidates,
+  density,
   selected,
   onPick,
   onSelect,
@@ -86,6 +100,7 @@ export function ProspectMap({
   center: MapCenter;
   radiusMiles: number;
   candidates: MapCandidate[];
+  density: MapDensityCell[];
   selected: Selection | undefined;
   onPick: (center: MapCenter) => void;
   onSelect: (selection: Selection) => void;
@@ -95,8 +110,8 @@ export function ProspectMap({
   const ready = useRef(false);
   const handlers = useRef({ onPick, onSelect });
   handlers.current = { onPick, onSelect };
-  const latest = useRef({ center, radiusMiles, candidates, selected });
-  latest.current = { center, radiusMiles, candidates, selected };
+  const latest = useRef({ center, radiusMiles, candidates, density, selected });
+  latest.current = { center, radiusMiles, candidates, density, selected };
 
   useEffect(() => {
     if (!container.current) return;
@@ -110,6 +125,7 @@ export function ProspectMap({
     instance.on("load", () => {
       instance.addSource(Source.County, { type: "geojson", data: COUNTY });
       instance.addSource(Source.Radius, { type: "geojson", data: EMPTY });
+      instance.addSource(Source.Density, { type: "geojson", data: EMPTY });
       instance.addSource(Source.Candidates, { type: "geojson", data: EMPTY });
       instance.addSource(Source.Center, { type: "geojson", data: EMPTY });
       instance.addLayer({
@@ -130,6 +146,31 @@ export function ProspectMap({
         source: Source.Radius,
         paint: { "line-color": COLORS.radius, "line-width": 2, "line-dasharray": [2, 2] },
       });
+      for (const [kind, color] of DENSITY_COLORS) {
+        instance.addLayer({
+          id: `${Layer.Density}-${kind}`,
+          type: "heatmap",
+          source: Source.Density,
+          filter: ["==", ["get", "kind"], kind],
+          paint: {
+            "heatmap-weight": ["min", 1, ["/", ["ln", ["+", 1, ["get", "matches"]]], 4]],
+            "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 8, 4, 11, 12, 14, 28],
+            "heatmap-intensity": 0.7,
+            "heatmap-opacity": 0.55,
+            "heatmap-color": [
+              "interpolate",
+              ["linear"],
+              ["heatmap-density"],
+              0,
+              `rgba(${color}, 0)`,
+              0.3,
+              `rgba(${color}, 0.3)`,
+              1,
+              `rgba(${color}, 0.75)`,
+            ],
+          },
+        });
+      }
       instance.addLayer({
         id: Layer.Candidates,
         type: "circle",
@@ -193,8 +234,8 @@ export function ProspectMap({
 
   useEffect(() => {
     if (map.current && ready.current)
-      draw(map.current, { center, radiusMiles, candidates, selected });
-  }, [center, radiusMiles, candidates, selected]);
+      draw(map.current, { center, radiusMiles, candidates, density, selected });
+  }, [center, radiusMiles, candidates, density, selected]);
 
   useEffect(() => {
     if (map.current && ready.current) fit(map.current, center, radiusMiles);
@@ -209,11 +250,13 @@ function draw(
     center,
     radiusMiles,
     candidates,
+    density,
     selected,
   }: {
     center: MapCenter;
     radiusMiles: number;
     candidates: MapCandidate[];
+    density: MapDensityCell[];
     selected: Selection | undefined;
   },
 ) {
@@ -222,6 +265,14 @@ function draw(
     type: "Feature",
     properties: {},
     geometry: { type: "Point", coordinates: [center.longitude, center.latitude] },
+  });
+  (instance.getSource(Source.Density) as GeoJSONSource).setData({
+    type: "FeatureCollection",
+    features: density.map((cell) => ({
+      type: "Feature",
+      properties: { kind: cell.kind, matches: cell.matches },
+      geometry: { type: "Point", coordinates: [cell.longitude, cell.latitude] },
+    })),
   });
   (instance.getSource(Source.Candidates) as GeoJSONSource).setData({
     type: "FeatureCollection",

@@ -50,6 +50,7 @@ const agedRoofs = (rows: number): ToolResult => ({
     source_run_id: "20261027T100000Z",
   })),
   totalMatches: 1_204,
+  summary: { high_confidence: 40, medium_confidence: 300, low_confidence: 864 },
   center: { name: "Pflugerville", latitude: 30.45, longitude: -97.6 },
   sql: "SELECT ...",
   dataset: DATASET,
@@ -99,7 +100,13 @@ describe("askAgent", () => {
       situs_address: "1 MAIN ST",
       roof_age_years: 30,
       roof_age_anchor: "year_built",
+      owner_name: null,
       source: "tcad-appraisal-export",
+    });
+    expect(forModel.summary).toEqual({
+      high_confidence: 40,
+      medium_confidence: 300,
+      low_confidence: 864,
     });
     expect(forModel.note).toMatch(/2 more rows/);
     expect(forModel.dataset).toEqual({ manifestCid: "bafkrei-manifest", rootCid: "bafybei-root" });
@@ -116,6 +123,30 @@ describe("askAgent", () => {
     await askAgent("Open permits near that area?", first.messages, deps);
 
     expect(seen[1]?.map((message) => message.role)).toEqual(["user", "assistant", "user"]);
+  });
+
+  it("sends only recent whole turns so long conversations stay within the server's limit", async () => {
+    const { seen, backend } = scriptedBackend([
+      reply({ content: "Latest answer.", tool_calls: [] }),
+    ]);
+    const longHistory: ChatMessage[] = Array.from({ length: 30 }, (_, turn) => [
+      { role: "user" as const, content: `question ${turn}` },
+      { role: "assistant" as const, content: "", tool_calls: [CALL] },
+      { role: "tool" as const, tool_call_id: "call-1", content: "{}" },
+      { role: "assistant" as const, content: `answer ${turn}` },
+    ]).flat();
+
+    await askAgent("newest question", longHistory, {
+      backend,
+      tools: { run: async () => agedRoofs(0) },
+      onEvent: () => {},
+    });
+
+    const sent = seen[0] ?? [];
+    expect(sent.length).toBeLessThanOrEqual(17);
+    expect(sent[0]).toMatchObject({ role: "user" });
+    expect(sent.at(-1)).toEqual({ role: "user", content: "newest question" });
+    expect(sent.at(-2)).toEqual({ role: "assistant", content: "answer 29" });
   });
 
   it("tells the model when a tool fails so it can correct itself", async () => {

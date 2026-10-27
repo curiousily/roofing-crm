@@ -5,6 +5,14 @@ import type { ToolDefinition } from "./agent-route.js";
 
 export const SEARCH_MY_LEADS = "search_my_leads";
 
+export enum LeadSort {
+  Recent = "recent",
+  OldestRoof = "oldest_roof",
+  LongestOpen = "longest_open",
+  Priority = "priority",
+  NextAction = "next_action",
+}
+
 const DEFAULT_LEADS = 20;
 const MAX_LEADS = 50;
 
@@ -21,6 +29,12 @@ export const searchMyLeadsInput = z.object({
     .min(0)
     .optional()
     .describe("Only leads whose roofing permit has been open at least this long."),
+  sort: z
+    .enum(LeadSort)
+    .default(LeadSort.Recent)
+    .describe(
+      "Order of the leads: oldest_roof finds the oldest roofs, longest_open the longest-open permits, next_action the soonest follow-ups.",
+    ),
   limit: z.number().int().positive().max(MAX_LEADS).default(DEFAULT_LEADS),
 });
 

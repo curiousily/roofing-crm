@@ -33,7 +33,7 @@ test("opens on Travis County and shows aged roofs and long-open roofing permits 
   const card = await candidates(page);
   await expect(card.getByRole("tab", { name: /Aged roofs [\d,]+/ })).toBeVisible();
   await expect(card.locator("tbody tr").first()).toContainText(
-    /completed_replacement|new_construction|year_built/,
+    /completed replacement|new construction|year built/,
   );
 
   await card.getByRole("tab", { name: /Open roofing permits/ }).click();
@@ -75,15 +75,17 @@ test("turns candidates into leads and filters the pipeline by roof age, permit s
   await expect(page.getByRole("status")).toContainText(/Added|already a lead/);
 
   await page.getByRole("link", { name: /Leads/ }).click();
-  const rows = page.locator(".data-table tbody tr");
+  const pipeline = page.locator(".card").filter({ hasText: "Your pipeline" });
+  await expect(pipeline.locator(".pipeline")).toBeVisible();
+  const rows = pipeline.locator(".data-table tbody tr");
   await expect(rows).not.toHaveCount(0);
   const total = await rows.count();
 
   await page.getByLabel("Roof age at least").fill("15");
   await expect(page.getByText(/of \d+ leads match/)).toBeVisible();
   await page.getByLabel("Roof age at least").fill("");
-  await page.getByLabel("Permit status").selectOption("expired");
-  await expect(rows.first()).toContainText("expired");
+  await page.getByLabel("Permit status").selectOption("open");
+  await expect(rows.first()).toContainText("open");
   await page.getByLabel("Permit status").selectOption("");
   await page.getByLabel("Near").selectOption("Austin");
   await expect(page.getByText(new RegExp(`of ${total} leads match`))).toBeVisible();
@@ -116,7 +118,7 @@ test("answers through the assistant with evidence that converts into leads", asy
                 function: {
                   name: "find_open_roofing_permits",
                   arguments: JSON.stringify({
-                    place: "Pflugerville",
+                    place: "Rollingwood",
                     radius_miles: 5,
                     min_years_open: 5,
                   }),
@@ -140,7 +142,7 @@ test("answers through the assistant with evidence that converts into leads", asy
   await page.getByRole("button", { name: /open roofing permits older than five years/ }).click();
 
   const evidence = page.locator(".evidence");
-  await expect(evidence).toContainText(/[\d,]+ matches around Pflugerville/);
+  await expect(evidence).toContainText(/[\d,]+ matches around Rollingwood/);
   await expect(page.locator(".bubble.agent")).toContainText("Scripted answer");
   await evidence.getByRole("button", { name: "+ Lead" }).first().click();
   await expect(

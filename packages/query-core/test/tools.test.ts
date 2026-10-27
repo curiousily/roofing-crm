@@ -2,6 +2,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   type DatasetInfo,
+  matchDensity,
   runTool,
   type SqlRunner,
   TOOLS,
@@ -38,7 +39,9 @@ beforeAll(async () => {
       ('2014-1 BP', '100 NEAR ST', 'expired', 'replacement', true, DATE '2014-03-01', 12, true, DATE '2014-03-01', 'Centec Holdings dba Wilson Roofing', '5125550142', 'wilson roofing', 'A+', 'https://www.bbb.org/x', DATE '2026-07-10', 'high', 1::BIGINT, ${north(1)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/1', 'austin-permits', 'run-p', 'Reroof residence'),
       ('2024-2 BP', '200 MID ST', 'open', 'replacement', true, DATE '2024-05-01', 2, false, DATE '2024-05-01', 'Quick Roofing', NULL, 'quick roofing', NULL, NULL, NULL, NULL, 4::BIGINT, ${north(2)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/2', 'austin-permits', 'run-p', 'Re-roof'),
       ('2006-3 BP', '800 FAR ST', 'open', 'repair', true, DATE '2006-01-01', 20, true, DATE '2006-01-01', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 3::BIGINT, ${north(9)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/3', 'austin-permits', 'run-p', 'Roof repair'),
-      ('2010-4 BP', '150 DONE ST', 'completed', 'replacement', false, NULL, NULL, false, DATE '2010-01-01', 'Quick Roofing', NULL, 'quick roofing', NULL, NULL, NULL, NULL, 1::BIGINT, ${north(1.5)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/4', 'austin-permits', 'run-p', 'Reroof')
+      ('2010-4 BP', '150 DONE ST', 'completed', 'replacement', false, NULL, NULL, false, DATE '2010-01-01', 'Quick Roofing', NULL, 'quick roofing', NULL, NULL, NULL, NULL, 1::BIGINT, ${north(1.5)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/4', 'austin-permits', 'run-p', 'Reroof'),
+      ('1990-5 BP', '50 OLD ST', 'expired', 'replacement', true, DATE '1990-02-01', 36, true, DATE '1990-02-01', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 2::BIGINT, ${north(0.5)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/5', 'austin-permits', 'run-p', 'Reroof'),
+      ('2025-6 BP', '60 PATIO ST', 'open', 'accessory', true, DATE '2025-03-01', 1, false, DATE '2025-03-01', 'Patio Co', NULL, 'patio co', NULL, NULL, NULL, NULL, 4::BIGINT, ${north(2.5)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/6', 'austin-permits', 'run-p', 'Patio cover')
     ) AS t(permit_number, address, permit_state, roof_work, unfinished, open_since, years_open, past_expiry, issue_date, contractor_name, contractor_phone, contractor_key, bbb_rating, bbb_profile_url, bbb_snapshot_date, bbb_match_confidence, prop_id, latitude, longitude, source_url, source, source_run_id, description);
 
     CREATE TABLE contractors AS SELECT * FROM (VALUES
@@ -74,6 +77,7 @@ describe("find_aged_roofs", () => {
     });
     expect(Number(result.rows[0]?.distance_miles)).toBeCloseTo(1, 1);
     expect(result.totalMatches).toBe(2);
+    expect(result.summary).toEqual({ high_confidence: 1, medium_confidence: 0, low_confidence: 1 });
     expect(result.dataset.manifestCid).toBe("bafkrei-manifest");
     expect(result.sql).toContain("FROM properties");
   });
@@ -118,11 +122,43 @@ describe("find_aged_roofs", () => {
 });
 
 describe("find_open_roofing_permits", () => {
-  it("lists never-finished roofing permits open long enough, longest open first, with contractor and BBB", async () => {
+  it("defaults to roofing permits still open, leaving out accessory work", async () => {
+    const result = await run("find_open_roofing_permits", { ...CENTER, min_years_open: 1 });
+    const withAccessory = await run("find_open_roofing_permits", {
+      ...CENTER,
+      min_years_open: 1,
+      include_accessory: true,
+    });
+
+    expect(ids(result.rows, "permit_number")).toEqual(["2024-2 BP"]);
+    expect(ids(withAccessory.rows, "permit_number")).toEqual(["2024-2 BP", "2025-6 BP"]);
+  });
+
+  it("can add never-finished permits that expired, longest open first, and summarizes all matches", async () => {
+    const result = await run("find_open_roofing_permits", {
+      ...CENTER,
+      radius_miles: 5,
+      min_years_open: 1,
+      include_expired: true,
+    });
+
+    expect(ids(result.rows, "permit_number")).toEqual(["1990-5 BP", "2014-1 BP", "2024-2 BP"]);
+    expect(result.rows[0]).toMatchObject({ contractor_name: null, bbb_rating: null });
+    expect(result.summary).toEqual({
+      still_open: 1,
+      expired_without_final: 2,
+      with_contractor: 2,
+      with_bbb_rating: 1,
+    });
+  });
+
+  it("can keep only permits that list a contractor, with its BBB grade", async () => {
     const result = await run("find_open_roofing_permits", {
       ...CENTER,
       radius_miles: 5,
       min_years_open: 5,
+      include_expired: true,
+      with_contractor: true,
     });
 
     expect(ids(result.rows, "permit_number")).toEqual(["2014-1 BP"]);
@@ -133,16 +169,6 @@ describe("find_open_roofing_permits", () => {
       bbb_rating: "A+",
       source_url: "https://abc.austintexas.gov/1",
     });
-  });
-
-  it("can leave out permits that expired without being finished", async () => {
-    const result = await run("find_open_roofing_permits", {
-      ...CENTER,
-      min_years_open: 1,
-      include_expired: false,
-    });
-
-    expect(ids(result.rows, "permit_number")).toEqual(["2024-2 BP"]);
   });
 });
 
@@ -213,5 +239,29 @@ describe("catalog", () => {
       ToolInputError,
     );
     await expect(run("no_such_tool", {})).rejects.toThrow(/unknown tool/i);
+  });
+});
+
+describe("matchDensity", () => {
+  it("counts every match per map cell so a map can show all of them", async () => {
+    const cells = await matchDensity(
+      "find_aged_roofs",
+      { ...CENTER, radius_miles: 10, min_roof_age_years: 15 },
+      { sql: runner, dataset: DATASET },
+      0.01,
+    );
+
+    expect(cells.reduce((total, cell) => total + cell.matches, 0)).toBe(3);
+    expect(cells[0]).toEqual({
+      latitude: expect.any(Number),
+      longitude: expect.any(Number),
+      matches: 1,
+    });
+  });
+
+  it("only maps radius searches", async () => {
+    await expect(
+      matchDensity("property_details", { prop_id: 1 }, { sql: runner, dataset: DATASET }, 0.01),
+    ).rejects.toThrow(ToolInputError);
   });
 });
