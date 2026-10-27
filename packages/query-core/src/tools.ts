@@ -5,8 +5,19 @@ import { type Center, distanceMiles, list, literal, withinBox } from "./sql.js";
 
 export type Row = Record<string, unknown>;
 
-export const TABLES = ["properties", "roofing_permits", "contractors", "permits"] as const;
+export const TABLES = [
+  "properties",
+  "roofing_permits",
+  "contractors",
+  "permits",
+  "businesses",
+] as const;
 export type TableName = (typeof TABLES)[number];
+
+export function publishedTables(built: readonly { table: string }[]): TableName[] {
+  const published = new Set(built.map(({ table }) => table));
+  return TABLES.filter((table) => published.has(table));
+}
 
 export interface SqlRunner {
   all(sql: string): Promise<Row[]>;
@@ -313,7 +324,7 @@ ORDER BY issue_date DESC NULLS LAST, permit_number LIMIT ${RELATED_ROWS}`;
 const contractorDetails = defineTool({
   name: "contractor_details",
   description:
-    "Look up roofing contractors by name: names used on permits, phones, permit counts, the archived BBB grade with how it was matched, and recent roofing permits of the best match.",
+    "Look up contractors by name: names used on permits, phones, trades, permit counts, the archived BBB grade, the Texas Comptroller taxpayer and TDLR licenses each with how it was matched, and recent roofing permits of the best match.",
   input: z.object({
     name: z.string().min(2).describe("Contractor or business name, or part of it."),
   }),
@@ -323,6 +334,7 @@ const contractorDetails = defineTool({
 WHERE contains(lower(contractor_key), ${term})
   OR contains(lower(array_to_string(names, ' | ')), ${term})
   OR contains(lower(coalesce(bbb_business_name, '')), ${term})
+  OR contains(lower(coalesce(registry_name, '')), ${term})
 ORDER BY roofing_permits DESC, contractor_key LIMIT ${MATCHING_CONTRACTORS}`;
     const rows = await context.sql.all(sql);
     const best = rows[0]?.contractor_key;

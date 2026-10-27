@@ -10,6 +10,7 @@ export interface Publication {
 export interface BuildSummary {
   buildId: string;
   asOf: string;
+  tables: { table: string }[];
 }
 
 export type Coverage = Record<string, { rows?: number; [field: string]: unknown }>;

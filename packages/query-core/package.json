@@ -15,5 +15,5 @@
   "dependencies": {
     "zod": "^4.6.7"
   },
-  "description": "Query tools over the Travis County Oracle dataset. Vendored from curiousily/oracle-property-intelligence-platform-pipeline-travis-tx packages/query-core at e3fd1d7."
+  "description": "Query tools over the Travis County Oracle dataset. Vendored from curiousily/oracle-property-intelligence-platform-pipeline-travis-tx packages/query-core at 326876c."
 }

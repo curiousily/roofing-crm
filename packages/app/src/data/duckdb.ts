@@ -1,5 +1,5 @@
 import * as duckdb from "@duckdb/duckdb-wasm";
-import { type Row, type SqlRunner, TABLES } from "@travis-oracle/query-core";
+import { publishedTables, type Row, type SqlRunner } from "@travis-oracle/query-core";
 import { DataType, type Field, type Table } from "apache-arrow";
 import type { Dataset } from "./dataset.js";
 
@@ -28,7 +28,7 @@ export async function openDatabase(dataset: Dataset): Promise<Database> {
 
   const connection = await db.connect();
   for (const setting of SETTINGS) await connection.query(setting).catch(() => undefined);
-  for (const table of TABLES) {
+  for (const table of publishedTables(dataset.build.tables)) {
     await connection.query(
       `CREATE VIEW ${table} AS SELECT * FROM read_parquet('${dataset.tableUrl(table)}')`,
     );

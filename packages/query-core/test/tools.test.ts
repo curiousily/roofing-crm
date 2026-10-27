@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   type DatasetInfo,
   matchDensity,
+  publishedTables,
   runTool,
   type SqlRunner,
   TOOLS,
@@ -45,9 +46,9 @@ beforeAll(async () => {
     ) AS t(permit_number, address, permit_state, roof_work, unfinished, open_since, years_open, past_expiry, issue_date, contractor_name, contractor_phone, contractor_key, bbb_rating, bbb_profile_url, bbb_snapshot_date, bbb_match_confidence, prop_id, latitude, longitude, source_url, source, source_run_id, description);
 
     CREATE TABLE contractors AS SELECT * FROM (VALUES
-      ('wilson roofing', ['Centec Holdings dba Wilson Roofing'], ['5125550142'], 103::BIGINT, 1::BIGINT, 90::BIGINT, 'A+', 'Wilson Roofing', true, 'https://www.bbb.org/x', DATE '2026-07-10', 'phone', 'medium'),
-      ('quick roofing', ['Quick Roofing'], [], 82::BIGINT, 1::BIGINT, 40::BIGINT, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
-    ) AS t(contractor_key, names, phones, roofing_permits, unfinished_roofing_permits, properties, bbb_rating, bbb_business_name, bbb_accredited, bbb_profile_url, bbb_snapshot_date, bbb_match_method, bbb_match_confidence);
+      ('wilson roofing', ['Centec Holdings dba Wilson Roofing'], ['5125550142'], 103::BIGINT, 1::BIGINT, 90::BIGINT, 'A+', 'Wilson Roofing', true, 'https://www.bbb.org/x', DATE '2026-07-10', 'phone', 'medium', 'WR AUSTIN HOLDINGS, LLC', true, 'name', ['A/C Contractor']),
+      ('quick roofing', ['Quick Roofing'], [], 82::BIGINT, 1::BIGINT, 40::BIGINT, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+    ) AS t(contractor_key, names, phones, roofing_permits, unfinished_roofing_permits, properties, bbb_rating, bbb_business_name, bbb_accredited, bbb_profile_url, bbb_snapshot_date, bbb_match_method, bbb_match_confidence, registry_name, registry_active, registry_match_method, license_types);
   `);
   runner = {
     all: async (sql) =>
@@ -190,6 +191,16 @@ describe("details", () => {
     });
     expect(ids(result.related ?? [], "permit_number")).toEqual(["2014-1 BP"]);
   });
+
+  it("finds a contractor by its legal name in the Texas registry, with its licenses", async () => {
+    const result = await run("contractor_details", { name: "WR Austin Holdings" });
+
+    expect(result.rows[0]).toMatchObject({
+      contractor_key: "wilson roofing",
+      registry_active: true,
+      license_types: ["A/C Contractor"],
+    });
+  });
 });
 
 describe("owner tools", () => {
@@ -214,6 +225,12 @@ describe("catalog", () => {
       build_id: "20261027T130000Z",
       manifest_cid: "bafkrei-manifest",
     });
+  });
+
+  it("lists only the tables a build published, in catalog order", () => {
+    expect(
+      publishedTables([{ table: "contractors" }, { table: "properties" }, { table: "unknown" }]),
+    ).toEqual(["properties", "contractors"]);
   });
 
   it("locates a place by name", async () => {

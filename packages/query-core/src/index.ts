@@ -5,6 +5,7 @@ export {
   type DatasetInfo,
   type DensityCell,
   matchDensity,
+  publishedTables,
   type Row,
   runTool,
   type SqlRunner,
