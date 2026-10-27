@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { SEARCH_MY_LEADS } from "../../worker/agent/crm-tools.js";
+import type { DatasetRef, NewLeadInput } from "../../worker/leads/lead.js";
 import {
   type AgentEvent,
   type AgentReply,
@@ -16,7 +17,13 @@ import type { Dataset } from "../data/dataset.js";
 import type { Database } from "../data/duckdb.js";
 import { formatCount, formatValue } from "../format.js";
 import { labelOf } from "../labels.js";
-import { leadFromPermit, leadFromProperty, withPropertyDetails } from "../leads/lead-input.js";
+import {
+  leadFromHail,
+  leadFromPermit,
+  leadFromProperty,
+  leadsFromTopLead,
+  withPropertyDetails,
+} from "../leads/lead-input.js";
 import { permitKey, propertyKey, useLeads } from "../leads/leads-context.js";
 import { datasetInfo } from "./dataset-info.js";
 
@@ -29,6 +36,8 @@ const EXAMPLES = [
 const EVIDENCE_ROWS = 10;
 const ROOF_TOOL = "find_aged_roofs";
 const PERMIT_TOOL = "find_open_roofing_permits";
+const HAIL_TOOL = "find_hail_hit_roofs";
+const TOP_TOOL = "find_top_leads";
 const EVIDENCE_COLUMNS: Record<string, string[]> = {
   [ROOF_TOOL]: [
     "situs_address",
@@ -45,6 +54,23 @@ const EVIDENCE_COLUMNS: Record<string, string[]> = {
     "years_open",
     "contractor_name",
     "bbb_rating",
+    "distance_miles",
+  ],
+  [HAIL_TOOL]: [
+    "situs_address",
+    "max_hail_inches",
+    "last_hail_date",
+    "roof_age_years",
+    "owner_name",
+    "distance_miles",
+  ],
+  [TOP_TOOL]: [
+    "situs_address",
+    "lead_score",
+    "roof_points",
+    "permit_points",
+    "hail_points",
+    "owner_name",
     "distance_miles",
   ],
   find_long_held_properties: ["situs_address", "ownership_years", "owner_name", "distance_miles"],
@@ -65,7 +91,18 @@ const EVIDENCE_COLUMNS: Record<string, string[]> = {
     "nextActionOn",
   ],
 };
-const CONVERTIBLE = new Set([ROOF_TOOL, PERMIT_TOOL]);
+const LEADS_OF: Record<
+  string,
+  (row: Row, details: Row | undefined, dataset: DatasetRef) => NewLeadInput[]
+> = {
+  [ROOF_TOOL]: (row, details, dataset) => [leadFromProperty(row, details, dataset)],
+  [PERMIT_TOOL]: (row, details, dataset) => [
+    withPropertyDetails(leadFromPermit(row, dataset), details),
+  ],
+  [HAIL_TOOL]: (row, details, dataset) => [leadFromHail(row, details, dataset)],
+  [TOP_TOOL]: leadsFromTopLead,
+};
+const CONVERTIBLE = new Set(Object.keys(LEADS_OF));
 
 interface Turn {
   question: string;
@@ -133,15 +170,11 @@ export function AssistantPage({ dataset, database }: { dataset: Dataset; databas
       Number.isFinite(propId) && propId > 0
         ? (await runTool("property_details", { prop_id: propId }, context)).rows[0]
         : undefined;
-    await leads.add(
-      tool === ROOF_TOOL
-        ? leadFromProperty(row, details, dataset.ref)
-        : withPropertyDetails(leadFromPermit(row, dataset.ref), details),
-    );
+    await leads.addMany(LEADS_OF[tool]?.(row, details, dataset.ref) ?? []);
   };
   const isSaved = (tool: string, row: Row) =>
     leads.savedKeys.has(
-      tool === ROOF_TOOL ? propertyKey(row.prop_id) : permitKey(row.permit_number),
+      tool === PERMIT_TOOL ? permitKey(row.permit_number) : propertyKey(row.prop_id),
     );
 
   return (

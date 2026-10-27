@@ -48,6 +48,38 @@ test("opens on Travis County and shows aged roofs and long-open roofing permits 
   await page.screenshot({ path: `${SCREENSHOTS}/prospect.png`, fullPage: true });
 });
 
+test("searches around a ZIP code, finds recent hail and top leads, and sorts the list", async ({
+  page,
+}) => {
+  await open(page, "prospect");
+  await page.getByLabel("Center on a place or ZIP code").selectOption("78704");
+  const card = await candidates(page);
+  await expect(card).toContainText("of 78704");
+
+  await card.getByRole("tab", { name: /Recent hail/ }).click();
+  await expect(card.locator("thead")).toContainText("Hail (in)");
+  await card.getByRole("tab", { name: /Top leads/ }).click();
+  await expect(card.locator("thead")).toContainText("Score");
+  await card.getByRole("button", { name: "Roof age", exact: true }).click();
+  await expect(card.locator("th[aria-sort=descending]")).toContainText("Roof age");
+  await page.screenshot({ path: `${SCREENSHOTS}/top-leads.png`, fullPage: true });
+});
+
+test("adds selected candidates to the leads in one step", async ({ page }) => {
+  await open(page, "prospect");
+  const card = await candidates(page);
+  await card.getByRole("tab", { name: /Top leads/ }).click();
+
+  const boxes = card.locator("tbody input[type=checkbox]");
+  await boxes.nth(0).check();
+  await boxes.nth(1).check();
+  await card.getByRole("button", { name: "Add 2 selected to leads" }).click();
+
+  await expect(page.getByRole("status")).toContainText("Added 2 new leads");
+  await expect(card.locator("tbody tr").first()).toContainText("lead");
+  await deleteAllLeads(page);
+});
+
 test("centers the search on a dropped pin with a configurable radius", async ({ page }) => {
   await open(page, "prospect");
   await candidates(page);

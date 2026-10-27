@@ -17,6 +17,7 @@ interface LeadsState {
   error: string | undefined;
   savedKeys: Set<string>;
   add(input: NewLeadInput): Promise<{ lead: Lead; created: boolean }>;
+  addMany(inputs: NewLeadInput[]): Promise<{ lead: Lead; created: boolean }[]>;
   update(id: string, update: LeadUpdate): Promise<Lead>;
   remove(id: string): Promise<void>;
   refresh(): Promise<void>;
@@ -70,6 +71,11 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       const result = await api.create(input);
       await refresh();
       return result;
+    },
+    addMany: async (inputs) => {
+      const added = await api.createMany(inputs);
+      await refresh();
+      return added;
     },
     update: async (id, update) => {
       const lead = await api.update(id, update);

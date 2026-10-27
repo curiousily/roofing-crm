@@ -29,12 +29,12 @@ beforeAll(async () => {
   const connection = await (await DuckDBInstance.create(":memory:")).connect();
   await connection.run(`
     CREATE TABLE properties AS SELECT * FROM (VALUES
-      (1::BIGINT, '100 NEAR ST', '78701', ${north(1)}, ${CENTER.longitude}, 1990::BIGINT, 'COMPOSITIO', 30, 'year_built', '1996', NULL, 'high', 'NEAR OWNER', 'out_of_state', 'CA', 22, 1::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a'),
-      (2::BIGINT, '300 YOUNG ST', '78701', ${north(3)}, ${CENTER.longitude}, 2016::BIGINT, 'METAL', 10, 'year_built', '2016', NULL, 'low', 'YOUNG OWNER', 'local', 'TX', 3, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a'),
-      (3::BIGINT, '800 FAR ST', '78660', ${north(8)}, ${CENTER.longitude}, 1980::BIGINT, 'COMPOSITIO', 46, 'year_built', '1980', NULL, 'low', 'FAR OWNER', 'regional', 'TX', 30, 0::BIGINT, 'address_point', 'tcad-appraisal-export', 'run-a'),
-      (4::BIGINT, '200 MID ST', '78701', ${north(2)}, ${CENTER.longitude}, 2006::BIGINT, 'COMPOSITIO', 20, 'year_built', '2006', NULL, 'low', 'MID OWNER', 'local', 'TX', 12, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a'),
-      (5::BIGINT, '1 NOWHERE', NULL, NULL, NULL, 1970::BIGINT, NULL, 56, 'year_built', '1970', NULL, 'low', 'LOST OWNER', 'local', 'TX', 40, 0::BIGINT, NULL, 'tcad-appraisal-export', 'run-a')
-    ) AS t(prop_id, situs_address, situs_zip, latitude, longitude, year_built, roof_covering, roof_age_years, roof_age_anchor, roof_age_anchor_date, roof_age_anchor_permit, roof_age_confidence, owner_name, owner_locality, mailing_state, ownership_years, unfinished_roofing_permits, coordinate_source, source, source_run_id);
+      (1::BIGINT, '100 NEAR ST', '78701', ${north(1)}, ${CENTER.longitude}, 1990::BIGINT, 'COMPOSITIO', 30, 'year_built', '1996', NULL, 'high', 'NEAR OWNER', 'out_of_state', 'CA', 22, 1::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', 12),
+      (2::BIGINT, '300 YOUNG ST', '78701', ${north(3)}, ${CENTER.longitude}, 2016::BIGINT, 'METAL', 10, 'completed_replacement', strftime(current_date - INTERVAL 6 MONTH, '%Y-%m-%d'), NULL, 'low', 'YOUNG OWNER', 'local', 'TX', 3, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', NULL),
+      (3::BIGINT, '800 FAR ST', '78660', ${north(8)}, ${CENTER.longitude}, 1980::BIGINT, 'COMPOSITIO', 46, 'year_built', '1980', NULL, 'low', 'FAR OWNER', 'regional', 'TX', 30, 0::BIGINT, 'address_point', 'tcad-appraisal-export', 'run-a', NULL),
+      (4::BIGINT, '200 MID ST', '78701', ${north(2)}, ${CENTER.longitude}, 2006::BIGINT, 'COMPOSITIO', 20, 'year_built', '2006', NULL, 'low', 'MID OWNER', 'local', 'TX', 12, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', NULL),
+      (5::BIGINT, '1 NOWHERE', NULL, NULL, NULL, 1970::BIGINT, NULL, 56, 'year_built', '1970', NULL, 'low', 'LOST OWNER', 'local', 'TX', 40, 0::BIGINT, NULL, 'tcad-appraisal-export', 'run-a', NULL)
+    ) AS t(prop_id, situs_address, situs_zip, latitude, longitude, year_built, roof_covering, roof_age_years, roof_age_anchor, roof_age_anchor_date, roof_age_anchor_permit, roof_age_confidence, owner_name, owner_locality, mailing_state, ownership_years, unfinished_roofing_permits, coordinate_source, source, source_run_id, max_years_open);
 
     CREATE TABLE roofing_permits AS SELECT * FROM (VALUES
       ('2014-1 BP', '100 NEAR ST', 'expired', 'replacement', true, DATE '2014-03-01', 12, true, DATE '2014-03-01', 'Centec Holdings dba Wilson Roofing', '5125550142', 'wilson roofing', 'A+', 'https://www.bbb.org/x', DATE '2026-07-10', 'high', 1::BIGINT, ${north(1)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/1', 'austin-permits', 'run-p', 'Reroof residence'),
@@ -44,6 +44,13 @@ beforeAll(async () => {
       ('1990-5 BP', '50 OLD ST', 'expired', 'replacement', true, DATE '1990-02-01', 36, true, DATE '1990-02-01', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 2::BIGINT, ${north(0.5)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/5', 'austin-permits', 'run-p', 'Reroof'),
       ('2025-6 BP', '60 PATIO ST', 'open', 'accessory', true, DATE '2025-03-01', 1, false, DATE '2025-03-01', 'Patio Co', NULL, 'patio co', NULL, NULL, NULL, NULL, 4::BIGINT, ${north(2.5)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/6', 'austin-permits', 'run-p', 'Patio cover')
     ) AS t(permit_number, address, permit_state, roof_work, unfinished, open_since, years_open, past_expiry, issue_date, contractor_name, contractor_phone, contractor_key, bbb_rating, bbb_profile_url, bbb_snapshot_date, bbb_match_confidence, prop_id, latitude, longitude, source_url, source, source_run_id, description);
+
+    CREATE TABLE hail_events AS SELECT * FROM (VALUES
+      ('E1', current_date - INTERVAL 1 YEAR, 1.75::DOUBLE, ${north(1.5)}, ${CENTER.longitude}, 'NEAR', 'https://www.ncei.noaa.gov/x?id=E1'),
+      ('E2', current_date - INTERVAL 1 YEAR, 2.5, ${north(8)}, ${CENTER.longitude}, 'FAR', 'https://www.ncei.noaa.gov/x?id=E2'),
+      ('E3', current_date - INTERVAL 6 MONTH, 0.75, ${north(3)}, ${CENTER.longitude}, 'SMALL', 'https://www.ncei.noaa.gov/x?id=E3'),
+      ('E4', current_date - INTERVAL 10 YEAR, 2.0, ${north(1)}, ${CENTER.longitude}, 'OLD', 'https://www.ncei.noaa.gov/x?id=E4')
+    ) AS t(event_id, event_date, magnitude_inches, latitude, longitude, location, source_url);
 
     CREATE TABLE contractors AS SELECT * FROM (VALUES
       ('wilson roofing', ['Centec Holdings dba Wilson Roofing'], ['5125550142'], 103::BIGINT, 1::BIGINT, 90::BIGINT, 'A+', 'Wilson Roofing', true, 'https://www.bbb.org/x', DATE '2026-07-10', 'phone', 'medium', 'WR AUSTIN HOLDINGS, LLC', true, 'name', ['A/C Contractor']),
@@ -119,6 +126,62 @@ describe("find_aged_roofs", () => {
 
   it("needs a place or coordinates", async () => {
     await expect(run("find_aged_roofs", { radius_miles: 5 })).rejects.toThrow(/place or latitude/i);
+  });
+});
+
+describe("find_hail_hit_roofs", () => {
+  it("finds roofs that took reported hail of an inch or more within two miles in the last three years, after the roof went on", async () => {
+    const result = await run("find_hail_hit_roofs", { ...CENTER });
+
+    expect(ids(result.rows, "prop_id")).toEqual(["1", "4"]);
+    expect(result.rows[0]).toMatchObject({
+      max_hail_inches: 1.75,
+      hail_reports: "1",
+      hail_source_url: "https://www.ncei.noaa.gov/x?id=E1",
+      roof_age_anchor_date: "1996",
+    });
+    expect(result.summary).toEqual({ roof_older_than_15_years: 2, two_inches_or_larger: 0 });
+  });
+
+  it("can ask for larger hail and a longer look-back", async () => {
+    const larger = await run("find_hail_hit_roofs", {
+      ...CENTER,
+      radius_miles: 10,
+      min_hail_inches: 2,
+    });
+    const older = await run("find_hail_hit_roofs", {
+      ...CENTER,
+      min_hail_inches: 2,
+      within_years: 15,
+    });
+
+    expect(ids(larger.rows, "prop_id")).toEqual(["3"]);
+    expect(ids(older.rows, "prop_id")).toEqual(["1", "4"]);
+  });
+});
+
+describe("find_top_leads", () => {
+  it("scores every lead signal of a property and ranks the strongest leads first", async () => {
+    const result = await run("find_top_leads", { ...CENTER });
+
+    expect(
+      result.rows.map((row) => [
+        row.prop_id,
+        row.lead_score,
+        row.roof_points,
+        row.permit_points,
+        row.hail_points,
+      ]),
+    ).toEqual([
+      ["1", 96, 40, 30, 26],
+      ["4", 33, 7, 0, 26],
+    ]);
+    expect(result.summary).toEqual({
+      with_aged_roof: 2,
+      with_unfinished_permit: 1,
+      with_recent_hail: 2,
+      with_two_or_more_signals: 2,
+    });
   });
 });
 
@@ -231,6 +294,13 @@ describe("catalog", () => {
     expect(
       publishedTables([{ table: "contractors" }, { table: "properties" }, { table: "unknown" }]),
     ).toEqual(["properties", "contractors"]);
+  });
+
+  it("locates a ZIP code by its Census internal point", async () => {
+    const result = await run("locate_place", { name: "78704" });
+
+    expect(result.rows[0]).toMatchObject({ name: "78704", kind: "ZIP code" });
+    expect(Number(result.rows[0]?.latitude)).toBeCloseTo(30.24, 1);
   });
 
   it("locates a place by name", async () => {

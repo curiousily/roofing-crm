@@ -7,6 +7,7 @@ import type {
 } from "../../worker/leads/lead.js";
 
 const LEADS_PATH = "/api/leads";
+const BATCH_PATH = "/batch";
 const WORKSPACE_HEADER = "x-workspace-id";
 const LIST_SEPARATOR = ",";
 const HTTP_CREATED = 201;
@@ -38,6 +39,11 @@ export class LeadsApi {
   async create(input: NewLeadInput): Promise<{ lead: Lead; created: boolean }> {
     const response = await this.send(LEADS_PATH, { method: "POST", body: JSON.stringify(input) });
     return { lead: await response.json(), created: response.status === HTTP_CREATED };
+  }
+
+  async createMany(inputs: NewLeadInput[]): Promise<{ lead: Lead; created: boolean }[]> {
+    const body = JSON.stringify({ leads: inputs });
+    return (await this.send(`${LEADS_PATH}${BATCH_PATH}`, { method: "POST", body })).json();
   }
 
   async update(id: string, update: LeadUpdate): Promise<Lead> {

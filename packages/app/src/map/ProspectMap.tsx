@@ -16,6 +16,8 @@ setWorkerUrl(mapWorkerUrl);
 export enum CandidateKind {
   AgedRoof = "aged_roof",
   OpenPermit = "open_permit",
+  Hail = "hail",
+  TopLead = "top_lead",
 }
 
 export interface MapCandidate {
@@ -51,6 +53,8 @@ const FULL_TURN = 2 * Math.PI;
 const COLORS = {
   agedRoof: "#e8590c",
   openPermit: "#7048e8",
+  hail: "#0c8599",
+  topLead: "#c2255c",
   saved: "#2b8a3e",
   radius: "#1c7ed6",
   county: "#495057",
@@ -59,6 +63,8 @@ const NOTHING_SELECTED = "";
 const DENSITY_COLORS: [CandidateKind, string][] = [
   [CandidateKind.AgedRoof, "232, 89, 12"],
   [CandidateKind.OpenPermit, "112, 72, 232"],
+  [CandidateKind.Hail, "12, 133, 153"],
+  [CandidateKind.TopLead, "194, 37, 92"],
 ];
 
 enum Layer {
@@ -182,6 +188,10 @@ export function ProspectMap({
             ["get", "kind"],
             CandidateKind.OpenPermit,
             COLORS.openPermit,
+            CandidateKind.Hail,
+            COLORS.hail,
+            CandidateKind.TopLead,
+            COLORS.topLead,
             COLORS.agedRoof,
           ],
           "circle-stroke-color": ["case", ["get", "saved"], COLORS.saved, "#ffffff"],

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { loadDataset } from "../../src/data/dataset.js";
 import {
+  leadFromHail,
   leadFromPermit,
   leadFromProperty,
+  leadsFromTopLead,
   withPropertyDetails,
 } from "../../src/leads/lead-input.js";
 import { LeadsApi } from "../../src/leads/leads-api.js";
@@ -89,6 +91,19 @@ describe("LeadsApi", () => {
     expect(created).toBe(false);
   });
 
+  it("adds many candidates in one batch request", async () => {
+    const { calls, fetchImpl } = recording(() =>
+      Response.json([{ lead: { id: "lead-1" }, created: true }]),
+    );
+    const input = { signal: LeadSignal.Hail, propId: 1, address: "1 MAIN ST", dataset: DATASET };
+
+    const added = await new LeadsApi(fetchImpl, () => WORKSPACE).createMany([input]);
+
+    expect(calls[0]?.url).toBe("/api/leads/batch");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ leads: [input] });
+    expect(added).toEqual([{ lead: { id: "lead-1" }, created: true }]);
+  });
+
   it("surfaces the server's validation message", async () => {
     const { fetchImpl } = recording(() =>
       Response.json({ error: "Invalid lead" }, { status: 400 }),
@@ -100,7 +115,59 @@ describe("LeadsApi", () => {
   });
 });
 
+const HAIL_ROW = {
+  prop_id: 866295,
+  situs_address: "1703 ALGUNO RD A",
+  latitude: 30.33,
+  longitude: -97.72,
+  roof_age_years: 12,
+  roof_age_anchor: "year_built",
+  roof_age_confidence: "low",
+  max_hail_inches: 2.5,
+  last_hail_date: "2025-05-28",
+};
+
 describe("lead input", () => {
+  it("turns a hail row into a hail lead with the largest reported hail and its date", () => {
+    expect(leadFromHail(HAIL_ROW, undefined, DATASET)).toEqual({
+      signal: "hail",
+      propId: 866295,
+      address: "1703 ALGUNO RD A",
+      latitude: 30.33,
+      longitude: -97.72,
+      roofAgeYears: 12,
+      roofAgeAnchor: "year_built",
+      roofAgeConfidence: "low",
+      hailInches: 2.5,
+      hailDate: "2025-05-28",
+      dataset: DATASET,
+    });
+  });
+
+  it("turns a top lead into one lead input per signal that scored", () => {
+    const row = {
+      ...HAIL_ROW,
+      roof_age_years: 39,
+      roof_age_confidence: "high",
+      max_years_open: 30,
+      roof_points: 40,
+      permit_points: 30,
+      hail_points: 30,
+    };
+
+    const inputs = leadsFromTopLead(row, undefined, DATASET);
+    const silent = leadsFromTopLead(
+      { ...row, permit_points: 0, hail_points: 0 },
+      undefined,
+      DATASET,
+    );
+
+    expect(inputs.map((input) => input.signal)).toEqual(["aged_roof", "open_permit", "hail"]);
+    expect(inputs[1]).toMatchObject({ propId: 866295, yearsOpen: 30 });
+    expect(inputs[2]).toMatchObject({ hailInches: 2.5 });
+    expect(silent.map((input) => input.signal)).toEqual(["aged_roof"]);
+  });
+
   it("turns an aged-roof row and its property details into a lead with the owner's mailing address", () => {
     const row = {
       prop_id: 276120,

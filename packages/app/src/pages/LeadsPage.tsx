@@ -29,6 +29,7 @@ const STATUS_TONE: Record<LeadStatus, Tone> = {
 const SIGNAL_LABEL: Record<LeadSignal, string> = {
   [LeadSignal.AgedRoof]: "aged roof",
   [LeadSignal.OpenPermit]: "open permit",
+  [LeadSignal.Hail]: "recent hail",
 };
 const FUTURE_ACTIONS = [
   "Send direct mailer",
@@ -210,6 +211,7 @@ function LeadTable({
             <th>Priority</th>
             <th>Roof</th>
             <th>Permit</th>
+            <th>Hail</th>
             <th>Contractor · BBB</th>
             <th>Next action</th>
             <th>Updated</th>
@@ -275,7 +277,14 @@ function LeadTable({
                   : "–"}
               </td>
               <td>
-                {lead.permitState ? `${lead.permitState} · ${lead.yearsOpen ?? "?"} y open` : "–"}
+                {lead.yearsOpen !== undefined
+                  ? `${lead.permitState ?? "unfinished"} · ${lead.yearsOpen} y open`
+                  : "–"}
+              </td>
+              <td>
+                {lead.hailInches !== undefined
+                  ? `${lead.hailInches}″ · ${lead.hailDate ?? ""}`
+                  : "–"}
               </td>
               <td>
                 {lead.contractorName ?? "–"}
@@ -378,8 +387,14 @@ function LeadDetail({ lead, onClose }: { lead: Lead; onClose: () => void }) {
             </dd>
             <dt>Permit</dt>
             <dd>
-              {lead.permitNumber
-                ? `${lead.permitNumber} · ${lead.permitState ?? ""} · open ${lead.yearsOpen ?? "?"} years`
+              {lead.yearsOpen !== undefined
+                ? `${lead.permitNumber ?? "roofing permit"} · ${lead.permitState ?? "unfinished"} · open ${lead.yearsOpen} years`
+                : "–"}
+            </dd>
+            <dt>Hail</dt>
+            <dd>
+              {lead.hailInches !== undefined
+                ? `${lead.hailInches}-inch hail reported on ${lead.hailDate ?? "?"} within 2 miles, after the roof went on (NOAA Storm Events)`
                 : "–"}
             </dd>
             <dt>Contractor</dt>

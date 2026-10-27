@@ -39,6 +39,35 @@ export function leadFromPermit(row: Row, dataset: DatasetRef): NewLeadInput {
   });
 }
 
+export function leadFromHail(
+  row: Row,
+  details: Row | undefined,
+  dataset: DatasetRef,
+): NewLeadInput {
+  return withoutEmpty({
+    ...leadFromProperty(row, details, dataset),
+    signal: LeadSignal.Hail,
+    hailInches: numberOf(row.max_hail_inches),
+    hailDate: textOf(row.last_hail_date),
+  });
+}
+
+export function leadsFromTopLead(
+  row: Row,
+  details: Row | undefined,
+  dataset: DatasetRef,
+): NewLeadInput[] {
+  const scored = (points: unknown) => (numberOf(points) ?? 0) > 0;
+  const property = leadFromProperty(row, details, dataset);
+  return [
+    ...(scored(row.roof_points) ? [property] : []),
+    ...(scored(row.permit_points)
+      ? [{ ...property, signal: LeadSignal.OpenPermit, yearsOpen: numberOf(row.max_years_open) }]
+      : []),
+    ...(scored(row.hail_points) ? [leadFromHail(row, details, dataset)] : []),
+  ];
+}
+
 export function withPropertyDetails(input: NewLeadInput, details: Row | undefined): NewLeadInput {
   if (!details) return input;
   return withoutEmpty({

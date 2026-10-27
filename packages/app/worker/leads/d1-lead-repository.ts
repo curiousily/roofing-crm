@@ -26,6 +26,8 @@ const COLUMNS: [keyof Lead, string][] = [
   ["yearsOpen", "years_open"],
   ["contractorName", "contractor_name"],
   ["bbbRating", "bbb_rating"],
+  ["hailInches", "hail_inches"],
+  ["hailDate", "hail_date"],
   ["signals", "signals"],
   ["status", "status"],
   ["priority", "priority"],

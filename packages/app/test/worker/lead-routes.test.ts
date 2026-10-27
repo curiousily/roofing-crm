@@ -60,6 +60,59 @@ describe("lead routes", () => {
     expect(listed.map((lead) => lead.id)).toEqual(["lead-1"]);
   });
 
+  it("stores the reported hail of a hail lead", async () => {
+    await send("POST", "/api/leads", {
+      signal: "hail",
+      propId: 303314,
+      address: "2216 BARTON SKWY",
+      hailInches: 1.75,
+      hailDate: "2026-05-09",
+      dataset: DATASET,
+    });
+
+    const [stored] = (await (await send("GET", "/api/leads")).json()) as Record<string, unknown>[];
+    expect(stored).toMatchObject({
+      signals: ["hail"],
+      hailInches: 1.75,
+      hailDate: "2026-05-09",
+      priority: "high",
+    });
+  });
+
+  it("adds a batch of candidates in order, merging the signals of the same property", async () => {
+    const response = await send("POST", "/api/leads/batch", {
+      leads: [
+        agedRoof,
+        { ...agedRoof, signal: "hail", hailInches: 2, hailDate: "2025-05-28" },
+        { ...agedRoof, propId: 303314, address: "2216 BARTON SKWY" },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+    const added = (await response.json()) as { lead: { id: string }; created: boolean }[];
+    expect(added.map(({ lead, created }) => [lead.id, created])).toEqual([
+      ["lead-1", true],
+      ["lead-1", false],
+      ["lead-2", true],
+    ]);
+    const listed = (await (await send("GET", "/api/leads")).json()) as {
+      id: string;
+      signals: string[];
+    }[];
+    expect(listed.find((lead) => lead.id === "lead-1")?.signals).toEqual(["aged_roof", "hail"]);
+  });
+
+  it("rejects an empty batch or one larger than 50", async () => {
+    expect((await send("POST", "/api/leads/batch", { leads: [] })).status).toBe(400);
+    expect(
+      (
+        await send("POST", "/api/leads/batch", {
+          leads: Array.from({ length: 51 }, () => agedRoof),
+        })
+      ).status,
+    ).toBe(400);
+  });
+
   it("merges a second signal for the same property instead of duplicating it", async () => {
     await send("POST", "/api/leads", agedRoof);
     const merged = await send("POST", "/api/leads", {

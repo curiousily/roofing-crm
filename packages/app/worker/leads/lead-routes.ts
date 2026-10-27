@@ -16,6 +16,8 @@ const MAX_TEXT = 300;
 const MAX_NOTES = 5_000;
 const MAX_ROOF_AGE = 500;
 const MAX_YEARS_OPEN = 200;
+const MAX_HAIL_INCHES = 10;
+const MAX_BATCH = 50;
 const MAX_RADIUS_MILES = 100;
 const LIST_SEPARATOR = ",";
 
@@ -53,6 +55,11 @@ const newLeadSchema = z
     yearsOpen: number(z.number().int().min(0).max(MAX_YEARS_OPEN)),
     contractorName: text,
     bbbRating: text,
+    hailInches: number(z.number().min(0).max(MAX_HAIL_INCHES)),
+    hailDate: z.iso
+      .date()
+      .nullish()
+      .transform((value) => value ?? undefined),
     dataset: z.object({
       rootCid: z.string().min(1).max(MAX_TEXT),
       buildId: z.string().min(1).max(MAX_TEXT),
@@ -61,6 +68,8 @@ const newLeadSchema = z
   .refine((lead) => lead.propId !== undefined || lead.permitNumber !== undefined, {
     message: "A lead needs a TCAD property id or a permit number.",
   });
+
+const batchSchema = z.object({ leads: z.array(newLeadSchema).min(1).max(MAX_BATCH) });
 
 const updateSchema = z.object({
   status: z.enum(LeadStatus).optional(),
@@ -125,6 +134,16 @@ export function leadRoutes(dependencies: LeadRoutesDependencies) {
     const filter = filterSchema.safeParse(context.req.query());
     if (!filter.success) return context.json(invalid(filter.error), HttpStatus.BadRequest);
     return context.json(await service.list(context.get("workspaceId"), filter.data));
+  });
+
+  app.post("/api/leads/batch", async (context) => {
+    const batch = batchSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!batch.success) return context.json(invalid(batch.error), HttpStatus.BadRequest);
+    const added = [];
+    for (const input of batch.data.leads) {
+      added.push(await service.create(context.get("workspaceId"), input));
+    }
+    return context.json(added);
   });
 
   app.post("/api/leads", async (context) => {

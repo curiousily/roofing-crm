@@ -43,6 +43,18 @@ const openPermit: NewLeadInput = {
   dataset: DATASET,
 };
 
+const hail: NewLeadInput = {
+  signal: LeadSignal.Hail,
+  propId: 276120,
+  address: "202 WALNUT ST",
+  roofAgeYears: 12,
+  roofAgeAnchor: "year_built",
+  roofAgeConfidence: "low",
+  hailInches: 1.75,
+  hailDate: "2026-05-09",
+  dataset: DATASET,
+};
+
 function lead(overrides: Partial<Lead> = {}): Lead {
   return { ...newLead("lead-1", "workspace-1", agedRoof, NOW).lead, ...overrides };
 }
@@ -75,6 +87,38 @@ describe("newLead", () => {
       newLead("c", "w", { ...agedRoof, roofAgeYears: 17, roofAgeConfidence: "low" }, NOW).lead
         .priority,
     ).toBe(LeadPriority.Medium);
+  });
+});
+
+describe("hail leads", () => {
+  it("keep the largest reported hail and its date, and rank inch-or-larger hail as high priority", () => {
+    const { lead: created } = newLead("lead-2", "workspace-1", hail, NOW);
+
+    expect(created).toMatchObject({
+      signals: [LeadSignal.Hail],
+      hailInches: 1.75,
+      hailDate: "2026-05-09",
+      priority: LeadPriority.High,
+    });
+    expect(newLead("lead-3", "workspace-1", { ...hail, hailInches: 0.75 }, NOW).lead.priority).toBe(
+      LeadPriority.Medium,
+    );
+  });
+
+  it("add hail to an existing lead and raise its priority", () => {
+    const young = newLead("lead-4", "workspace-1", { ...agedRoof, roofAgeYears: 8 }, NOW).lead;
+
+    const { lead: merged, activities } = mergeLead(young, hail, LATER);
+
+    expect(merged).toMatchObject({
+      signals: [LeadSignal.AgedRoof, LeadSignal.Hail],
+      hailInches: 1.75,
+      priority: LeadPriority.High,
+    });
+    expect(activities[0]).toMatchObject({
+      kind: ActivityKind.SignalAdded,
+      detail: LeadSignal.Hail,
+    });
   });
 });
 

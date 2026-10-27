@@ -56,6 +56,8 @@ function leadRow(lead: Lead): Row {
     years_open: lead.yearsOpen ?? null,
     contractor_name: lead.contractorName ?? null,
     bbb_rating: lead.bbbRating ?? null,
+    hail_inches: lead.hailInches ?? null,
+    hail_date: lead.hailDate ?? null,
     next_action_on: lead.nextActionOn ?? null,
     notes: lead.notes || null,
   };

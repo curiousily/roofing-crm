@@ -1,7 +1,14 @@
 import { z } from "zod";
-import { PLACES_SOURCE } from "./places.js";
-import { findPlace, ToolInputError } from "./places-lookup.js";
-import { type Center, distanceMiles, list, literal, withinBox } from "./sql.js";
+import { findPlace, sourceOf, ToolInputError } from "./places-lookup.js";
+import {
+  type Center,
+  distanceMiles,
+  list,
+  literal,
+  milesBetween,
+  nearRow,
+  withinBox,
+} from "./sql.js";
 
 export type Row = Record<string, unknown>;
 
@@ -11,6 +18,7 @@ export const TABLES = [
   "contractors",
   "permits",
   "businesses",
+  "hail_events",
 ] as const;
 export type TableName = (typeof TABLES)[number];
 
@@ -88,6 +96,15 @@ const MAX_ROWS = 200;
 const DEFAULT_ROOF_AGE_YEARS = 15;
 const DEFAULT_YEARS_OPEN = 5;
 const DEFAULT_OWNERSHIP_YEARS = 10;
+const DAMAGING_HAIL_INCHES = 1;
+const LARGE_HAIL_INCHES = 2;
+const LARGEST_HAIL_INCHES = 6;
+const HAIL_REACH_MILES = 2;
+const DEFAULT_HAIL_YEARS = 3;
+const MAX_HAIL_YEARS = 25;
+const YEAR_BUILT_ROOF_MONTH = 12;
+const YEAR_BUILT_ROOF_DAY = 31;
+const ISO_DATE_LENGTH = "YYYY-MM-DD".length;
 const RELATED_ROWS = 10;
 const MATCHING_CONTRACTORS = 5;
 const DISTANCE_DECIMALS = 2;
@@ -107,7 +124,9 @@ const near = {
     .string()
     .min(2)
     .optional()
-    .describe("A city or community in or near Travis County, for example 'Pflugerville'."),
+    .describe(
+      "A city, community or ZIP code in or near Travis County, for example 'Pflugerville' or '78704'.",
+    ),
   latitude: z.number().min(29).max(31).optional().describe("Center latitude (WGS84)."),
   longitude: z.number().min(-99).max(-96).optional().describe("Center longitude (WGS84)."),
   radius_miles: z
@@ -237,6 +256,143 @@ const findAgedRoofs = defineNearbyTool({
           .reverse()
           .map((level) => [`${level}_confidence`, `roof_age_confidence = ${literal(level)}`]),
       ),
+    };
+  },
+});
+
+interface HailSearch {
+  center: Center;
+  radiusMiles: number;
+  minHailInches: number;
+  withinYears: number;
+}
+
+function hailHits({ center, radiusMiles, minHailInches, withinYears }: HailSearch): string {
+  const roofDate = `coalesce(TRY_CAST(p.roof_age_anchor_date AS DATE), make_date(TRY_CAST(p.roof_age_anchor_date AS INTEGER), ${YEAR_BUILT_ROOF_MONTH}, ${YEAR_BUILT_ROOF_DAY}))`;
+  return `(
+    SELECT p.prop_id, max(h.magnitude_inches) AS max_hail_inches,
+      max(h.event_date) AS last_hail_date, count(DISTINCT h.event_id) AS hail_reports,
+      arg_max(h.source_url, h.magnitude_inches) AS hail_source_url
+    FROM properties p
+    JOIN hail_events h ON ${nearRow("h", "p", HAIL_REACH_MILES, center.latitude)}
+    WHERE ${withinBox(center, radiusMiles, "p")}
+      AND h.magnitude_inches >= ${minHailInches}
+      AND h.event_date >= DATE ${literal(yearsAgo(withinYears))}
+      AND h.event_date > ${roofDate}
+      AND ${milesBetween("p", { latitude: "h.latitude", longitude: "h.longitude" })} <= ${HAIL_REACH_MILES}
+    GROUP BY 1
+  )`;
+}
+
+function yearsAgo(years: number): string {
+  const date = new Date();
+  date.setUTCFullYear(date.getUTCFullYear() - years);
+  return date.toISOString().slice(0, ISO_DATE_LENGTH);
+}
+
+const hailInput = {
+  min_hail_inches: z
+    .number()
+    .min(0)
+    .max(LARGEST_HAIL_INCHES)
+    .default(DAMAGING_HAIL_INCHES)
+    .describe("Smallest reported hail size in inches; one inch is quarter-size hail."),
+  within_years: z
+    .number()
+    .int()
+    .positive()
+    .max(MAX_HAIL_YEARS)
+    .default(DEFAULT_HAIL_YEARS)
+    .describe("Only hail reported in the last this many years."),
+};
+
+const HAIL_COLUMNS = "max_hail_inches, last_hail_date, hail_reports, hail_source_url";
+
+const findHailHitRoofs = defineNearbyTool({
+  name: "find_hail_hit_roofs",
+  description: `Find properties within a radius whose current roof took reported hail: a NOAA Storm Events hail report of at least min_hail_inches within ${HAIL_REACH_MILES} miles of the property, in the last within_years years and after the roof's anchor date (completed reroof, new construction or year built). Largest hail first, then most recent. Reports mark where hail was observed; unreported hail is missing.`,
+  input: z.object({ ...near, ...hailInput, limit }),
+  nearby: (input) => {
+    const center = centerOf(input);
+    const hits = hailHits({
+      center,
+      radiusMiles: input.radius_miles,
+      minHailInches: input.min_hail_inches,
+      withinYears: input.within_years,
+    });
+    return {
+      table: `(SELECT p.*, ${HAIL_COLUMNS} FROM properties p JOIN ${hits} hits USING (prop_id)) AS hail_hit_roofs`,
+      columns: `${PROPERTY_COLUMNS}, ${HAIL_COLUMNS}`,
+      center,
+      radiusMiles: input.radius_miles,
+      conditions: [],
+      orderBy: "max_hail_inches DESC, last_hail_date DESC, distance_miles, prop_id",
+      rows: input.limit,
+      summary: {
+        [`roof_older_than_${DEFAULT_ROOF_AGE_YEARS}_years`]: `roof_age_years > ${DEFAULT_ROOF_AGE_YEARS}`,
+        two_inches_or_larger: `max_hail_inches >= ${LARGE_HAIL_INCHES}`,
+      },
+    };
+  },
+});
+
+const ROOF_CONFIDENCE_WEIGHTS = { high: 1, medium: 0.75, low: 0.5 } as const;
+const SCORE = {
+  roof: { points: 40, fullAfterYears: 15 },
+  permit: { points: 30, fullAfterYears: 10 },
+  hail: { points: 30, fullAtInches: 2 },
+} as const;
+
+const findTopLeads = defineNearbyTool({
+  name: "find_top_leads",
+  description: `Rank properties within a radius by a transparent lead score from 0 to 100: roof_points (up to ${SCORE.roof.points}) grow with roof age beyond ${DEFAULT_ROOF_AGE_YEARS} years and are weighted by roof-age confidence (high ${ROOF_CONFIDENCE_WEIGHTS.high}, medium ${ROOF_CONFIDENCE_WEIGHTS.medium}, low ${ROOF_CONFIDENCE_WEIGHTS.low}); permit_points (up to ${SCORE.permit.points}) grow with how long a roofing permit has been left unfinished; hail_points (up to ${SCORE.hail.points}) grow with the largest recent hail on the current roof (see find_hail_hit_roofs). Strongest leads first; every component is returned.`,
+  input: z.object({ ...near, ...hailInput, limit }),
+  nearby: (input) => {
+    const center = centerOf(input);
+    const hits = hailHits({
+      center,
+      radiusMiles: input.radius_miles,
+      minHailInches: input.min_hail_inches,
+      withinYears: input.within_years,
+    });
+    const share = (value: string, full: number) => `least(greatest(${value}, 0) / ${full}, 1)`;
+    const confidence = `CASE p.roof_age_confidence ${Object.entries(ROOF_CONFIDENCE_WEIGHTS)
+      .map(([level, weight]) => `WHEN ${literal(level)} THEN ${weight}`)
+      .join(" ")} ELSE 0 END`;
+    const points = (expression: string, maximum: number) =>
+      `CAST(round(${maximum} * coalesce(${expression}, 0)) AS INTEGER)`;
+    const roof = points(
+      `${share(`p.roof_age_years - ${DEFAULT_ROOF_AGE_YEARS}`, SCORE.roof.fullAfterYears)} * ${confidence}`,
+      SCORE.roof.points,
+    );
+    const permit = points(
+      `CASE WHEN p.unfinished_roofing_permits > 0 THEN ${share("p.max_years_open", SCORE.permit.fullAfterYears)} END`,
+      SCORE.permit.points,
+    );
+    const hail = points(share("hits.max_hail_inches", SCORE.hail.fullAtInches), SCORE.hail.points);
+    return {
+      table: `(
+  SELECT *, roof_points + permit_points + hail_points AS lead_score
+  FROM (
+    SELECT p.*, ${HAIL_COLUMNS},
+      ${roof} AS roof_points, ${permit} AS permit_points, ${hail} AS hail_points
+    FROM properties p LEFT JOIN ${hits} hits USING (prop_id)
+    WHERE ${withinBox(center, input.radius_miles, "p")}
+  )
+) AS scored_leads`,
+      columns: `${PROPERTY_COLUMNS}, max_years_open, ${HAIL_COLUMNS}, roof_points, permit_points, hail_points, lead_score`,
+      center,
+      radiusMiles: input.radius_miles,
+      conditions: ["lead_score > 0"],
+      orderBy: "lead_score DESC, distance_miles, prop_id",
+      rows: input.limit,
+      summary: {
+        with_aged_roof: "roof_points > 0",
+        with_unfinished_permit: "permit_points > 0",
+        with_recent_hail: "hail_points > 0",
+        with_two_or_more_signals:
+          "(roof_points > 0)::INTEGER + (permit_points > 0)::INTEGER + (hail_points > 0)::INTEGER >= 2",
+      },
     };
   },
 });
@@ -412,11 +568,11 @@ const findOutOfAreaOwners = defineNearbyTool({
 const locatePlace = defineTool({
   name: "locate_place",
   description:
-    "Coordinates of a city or community in or near Travis County (Census internal point).",
-  input: z.object({ name: z.string().min(2).describe("Place name.") }),
+    "Coordinates of a city, community or ZIP code in or near Travis County (Census internal point).",
+  input: z.object({ name: z.string().min(2).describe("Place name or five-digit ZIP code.") }),
   run: async (_context, input) => {
     const place = findPlace(input.name);
-    return { rows: [{ ...place, source: PLACES_SOURCE }], sql: "" };
+    return { rows: [{ ...place, source: sourceOf(place) }], sql: "" };
   },
 });
 
@@ -442,6 +598,8 @@ const datasetSummary = defineTool({
 export const TOOLS = [
   findAgedRoofs,
   findOpenRoofingPermits,
+  findHailHitRoofs,
+  findTopLeads,
   propertyDetails,
   contractorDetails,
   findLongHeldProperties,

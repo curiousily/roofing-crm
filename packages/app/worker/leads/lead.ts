@@ -10,6 +10,7 @@ export enum LeadStatus {
 export enum LeadSignal {
   AgedRoof = "aged_roof",
   OpenPermit = "open_permit",
+  Hail = "hail",
 }
 
 export enum LeadPriority {
@@ -48,6 +49,8 @@ export interface LeadFacts {
   yearsOpen?: number | undefined;
   contractorName?: string | undefined;
   bbbRating?: string | undefined;
+  hailInches?: number | undefined;
+  hailDate?: string | undefined;
 }
 
 export interface NewLeadInput extends LeadFacts {
@@ -106,6 +109,7 @@ export interface LeadFilter {
 
 const HIGH_PRIORITY_ROOF_AGE_YEARS = 20;
 const HIGH_PRIORITY_YEARS_OPEN = 5;
+const HIGH_PRIORITY_HAIL_INCHES = 1;
 const WELL_EVIDENCED_ROOF_AGE = new Set(["high", "medium"]);
 const EARTH_RADIUS_MILES = 3958.8;
 const CLEARED = "cleared";
@@ -133,6 +137,8 @@ const FACT_FIELDS: (keyof LeadFacts)[] = [
   "yearsOpen",
   "contractorName",
   "bbbRating",
+  "hailInches",
+  "hailDate",
 ];
 
 export function newLead(
@@ -281,7 +287,8 @@ function priorityOf(facts: LeadFacts): LeadPriority {
   const oldRoof =
     (facts.roofAgeYears ?? 0) >= HIGH_PRIORITY_ROOF_AGE_YEARS &&
     WELL_EVIDENCED_ROOF_AGE.has(facts.roofAgeConfidence ?? "");
-  return longOpen || oldRoof ? LeadPriority.High : LeadPriority.Medium;
+  const damagingHail = (facts.hailInches ?? 0) >= HIGH_PRIORITY_HAIL_INCHES;
+  return longOpen || oldRoof || damagingHail ? LeadPriority.High : LeadPriority.Medium;
 }
 
 function higher(first: LeadPriority, second: LeadPriority): LeadPriority {
