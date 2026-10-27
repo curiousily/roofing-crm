@@ -1,9 +1,9 @@
 # RoofLead CRM: roofing lead identification for Travis County, TX
 
 A map-based roofing CRM:
-- Drop a pin, use GPS or pick a city, and set a radius.
-- Find roofs older than a threshold and roofing permits that stayed open for years, with the contractor and its BBB grade.
-- Turn the matches into tracked leads.
+- Drop a pin, use GPS, or pick a city or ZIP code, and set a radius.
+- Find roofs older than a threshold, roofing permits that stayed open for years (with the contractor and its BBB grade), and roofs that took reported hail after they went on.
+- Rank every candidate by a transparent lead score, sort the list, and add one or many matches to the tracked leads.
 - Ask an assistant in plain language.
 
 It consumes the published [Travis County Oracle](https://github.com/curiousily/oracle-property-intelligence-platform-pipeline-travis-tx) dataset by CID and runs on free plans.
@@ -15,7 +15,7 @@ The original brief is in [docs/ASSIGNMENT.md](docs/ASSIGNMENT.md).
 ## Demo path
 
 1. **Prospecting map** opens on Travis County (county outline) and searches 5 miles around Austin.
-2. Click the map to drop a pin, or press **Use my location** (positions outside the Travis County outline are refused with a message), then drag the radius.
+2. Click the map to drop a pin, press **Use my location** (positions outside the Travis County outline are refused with a message), or pick a place or one of 58 Travis County ZIP codes, then drag the radius.
 3. The **Aged roofs** tab lists roofs older than 15 years (configurable), and the orange heatmap shades every match in the radius. The best-evidenced ages come first (completed reroof permit, then new construction, then year built) and are drawn as orange points.
 4. The **Open roofing permits** tab lists permits still open 5+ years (configurable), longest open first, drawn as purple points over a purple heatmap of all matches. Each row shows status, open duration, contractor and BBB grade. Toggles add permits that expired without a final inspection, keep only permits that list a contractor, or include accessory work.
 5. Click a row or a point to see the permit details:
@@ -24,24 +24,26 @@ The original brief is in [docs/ASSIGNMENT.md](docs/ASSIGNMENT.md).
    - BBB grade with its snapshot date and match confidence
    - link to the city record
    - the property's owner, mailing address and roof facts
-6. Press **+ Lead** or **Add to leads**. The point turns green and the lead appears under **Leads**.
-7. **Leads** shows the pipeline. Leads can be:
+6. The **Recent hail** tab lists roofs with a NOAA Storm Events hail report of 1 inch or more (configurable) within 2 miles in the last 3 years (configurable), after the roof's anchor date, largest hail first, with a link to the NOAA record.
+7. The **Top leads** tab ranks properties by a 0–100 score with its parts in their own columns: roof points (up to 40) for roof age beyond 15 years weighted by its confidence, permit points (up to 30) for years a roofing permit stayed unfinished, and hail points (up to 30) for the largest recent hail. Every column sorts.
+8. Press **+ Lead** or **Add to leads**, or tick several candidates and press **Add N selected to leads** (one batch request, up to 50 a call). The points turn green and the leads appear under **Leads**; a top lead keeps every signal that scored.
+9. **Leads** shows the pipeline. Leads can be:
    - filtered by stage, signal, roof age, permit status, open duration and distance from a place
    - edited for status, priority, next action and notes, with the activity history
-8. **Assistant** answers questions such as "Show me open roofing permits older than five years within five miles of Pflugerville". Each answer shows the evidence rows with **+ Lead** buttons, and the assistant can also search your own leads.
-9. **Coming soon** (sidebar) and **Outreach** (lead detail) show the disabled expansions: campaigns, estimates, inspections, insurance claims, storm alerts and reports.
+10. **Assistant** answers questions such as "Show me open roofing permits older than five years within five miles of Pflugerville". Each answer shows the evidence rows with **+ Lead** buttons, and the assistant can also search your own leads.
+11. **Coming soon** (sidebar) and **Outreach** (lead detail) show the disabled expansions: campaigns, estimates, inspections, insurance claims, storm alerts and reports.
 
 ## Acceptance criteria
 
 | Criterion | Where |
 |---|---|
-| Default to a county, explore a selected area | The map opens on the Travis County boundary (Census TIGERweb). Place picker with 51 Census places. |
+| Default to a county, explore a selected area | The map opens on the Travis County boundary (Census TIGERweb). Picker with 51 Census places and 58 ZIP codes. |
 | Center on GPS or a dropped pin | **Use my location** button; clicking the map drops a pin. |
 | Configurable radius | Radius slider, 1–30 miles. |
 | Roofs older than a threshold | Aged-roof heatmap of every match, the first 200 as points, and the list. The threshold and the minimum roof-age confidence are adjustable. |
 | Open roofing permits, long-open first | Still-open permits sorted by years open, as a heatmap, points and a list. Options: minimum years, add expired-without-final, contractor-only, include accessory work, issued-since year. |
 | Permit details with status, open duration, contractor, BBB | Candidate detail panel, lead detail and the assistant's evidence. |
-| Browsable list of candidates | **Lead candidates** tabs under the map, with SQL disclosure and dataset CID. |
+| Browsable list of candidates | **Lead candidates** tabs under the map (aged roofs, open permits, recent hail, top leads), sortable, with multi-select, SQL disclosure and dataset CID. |
 | Create and manage CRM leads | **+ Lead** on any candidate or evidence row, then the **Leads** pipeline (status, priority, notes, next action, activity history, delete). |
 | RAG-backed agent | **Assistant**: retrieval through validated tools over the dataset and your leads, answers grounded in the shown evidence. |
 | Filter leads by roof age, permit status and duration, radius | Leads filters. |
@@ -69,14 +71,15 @@ flowchart LR
   SB --> EX[Travis Oracle explorer Worker<br/>R2 mirror by CID, public IPFS fallback]
 ```
 
-- **Data.** The browser loads the latest publication from `/api/publications` and queries its Parquet tables (`properties`, `roofing_permits`, `contractors`, `permits`) with DuckDB-WASM over HTTP range requests on `/ipfs/<root CID>/…`. The Worker forwards these paths over a service binding to the Oracle explorer, which serves them from its R2 mirror or from public IPFS gateways. No database server is involved.
-- **Queries.** [`packages/query-core`](packages/query-core) holds the validated query tools. It is vendored from the pipeline repo (at `1f45d37`) as the shared data-model contract. Radius search uses haversine distance with a bounding-box prefilter.
+- **Data.** The browser loads the latest publication from `/api/publications` and queries its Parquet tables (`properties`, `roofing_permits`, `contractors`, `permits`, `businesses`, `hail_events`, `owners`, whichever the publication holds) with DuckDB-WASM over HTTP range requests on `/ipfs/<root CID>/…`. The Worker forwards these paths over a service binding to the Oracle explorer, which serves them from its R2 mirror or from public IPFS gateways. No database server is involved.
+- **Queries.** [`packages/query-core`](packages/query-core) holds the validated query tools. It is vendored from the pipeline repo (at `0513040`) as the shared data-model contract. Radius search uses haversine distance with a bounding-box prefilter.
 - **Leads.** Leads live in D1 (`migrations/`).
   - **Workspaces.** Every browser gets its own workspace id, so reviewers do not see or overwrite each other's leads. The sidebar can start a new workspace.
   - **What a lead keeps.** A snapshot of the property and permit facts, the signals that found it, and the dataset root CID and build it came from.
   - **Merging.** Adding the same property again merges the new signal instead of duplicating it. A second open permit on the same property is logged, and the lead keeps the facts of the longest-open one.
   - **Edits.** Each edit writes only the changed columns and an activity record, so concurrent edits do not overwrite each other.
-  - **Priority.** High when a permit has been open 5+ years, or a roof is 20+ years old with permit-based evidence; otherwise medium. Merging can raise the priority but never lowers it.
+  - **Priority.** High when a permit has been open 5+ years, a roof is 20+ years old with permit-based evidence, or hail of an inch or more was reported on the current roof; otherwise medium.
+  - **Batch.** `POST /api/leads/batch` adds up to 50 candidates in order, merging signals of the same property. Merging can raise the priority but never lowers it.
 - **Assistant.**
   - **The loop.** The browser runs the tool loop. The Worker adds the system prompt and the tool list (query-core tools plus `search_my_leads`), validates the conversation, and calls `@cf/qwen/qwen3-30b-a3b-fp8`.
   - **Costs.** Identical conversations are answered from a KV cache.
@@ -104,7 +107,10 @@ cd packages/app
 npm run dev        # local UI and Worker against the deployed D1, KV and Oracle explorer (remote bindings; needs wrangler login)
 npm run e2e        # Playwright playthrough of the demo path against the deployed CRM
 npm run deploy     # build and deploy (after: npx wrangler d1 migrations apply roofing-crm --remote)
+OPENROUTER_API_KEY=… npm run demo   # record the narrated demo video into demo/output
 ```
+
+The demo recorder plays the demo path in Chromium and narrates it with Gemini 3.8 Flash TTS (voice Charon) through OpenRouter. Every narration clip is transcribed by a second model and must match its script before it is used, and waits for data or the model are cut out of the video.
 
 Pushes to `travis-crm` run [deploy.yml](.github/workflows/deploy.yml): tests, D1 migrations, deploy, and a Playwright playthrough of the deployed site whose screenshots are kept as an artifact.
 

@@ -1,6 +1,7 @@
 const LABELS: Record<string, string> = {
   situs_address: "Address",
   owner_name: "Owner",
+  owner_properties: "Properties this owner holds",
   owner_locality: "Owner lives",
   mailing_line1: "Mailing address",
   mailing_city: "Mailing city",

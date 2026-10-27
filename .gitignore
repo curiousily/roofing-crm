@@ -7,3 +7,4 @@ test-results/
 playwright-report/
 .wrangler/
 packages/*/demo/output/
+packages/*/demo/narration-cache/

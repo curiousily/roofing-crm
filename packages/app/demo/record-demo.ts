@@ -1,42 +1,52 @@
-import { mkdir, readdir, rename, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Locator, type Page } from "@playwright/test";
+import { Narrator } from "./narration.js";
 
 const CRM_URL = process.env.CRM_URL ?? "https://roofing-crm.curiousily.workers.dev";
 const OUTPUT_DIR = process.env.DEMO_DIR ?? "demo/output";
+const NARRATION_CACHE_DIR = "demo/narration-cache";
+const VIDEO_FILE = "crm-demo.mp4";
 const VIEWPORT = { width: 1440, height: 900 };
-const READ_MS = 4_500;
-const LONG_READ_MS = 7_000;
-const SETTLE_MS = 1_500;
+const PAUSE_AFTER_LINE_MS = 700;
+const SETTLE_MS = 1_100;
 const DATA_TIMEOUT_MS = 120_000;
 const AGENT_TIMEOUT_MS = 180_000;
 const PIN = { x: 0.55, y: 0.5 };
+const ZIP_CODE = "78704";
+const BULK_ROWS = 3;
 const AGENT_QUESTION =
   "Show me open roofing permits older than five years within five miles of Rollingwood.";
 
-const CAPTION_SCRIPT = `
-  window.demoCaption = (title, body) => {
-    let box = document.getElementById("demo-caption");
-    if (!box) {
-      box = document.createElement("div");
-      box.id = "demo-caption";
-      box.style.cssText = "position:fixed;left:calc(50% + 120px);top:6px;transform:translateX(-50%);width:min(1000px,90vw);z-index:99999;" +
-        "background:rgba(17,20,24,.94);color:#fff;padding:10px 20px;border-radius:10px;font:14px/1.4 Inter,system-ui,sans-serif;" +
-        "box-shadow:0 8px 30px rgba(0,0,0,.35)";
-      document.body.appendChild(box);
-    }
-    box.innerHTML = "<div style='font-weight:700;font-size:16px;margin-bottom:4px'>" + title + "</div><div>" + body + "</div>";
-  };
-`;
-
-async function caption(page: Page, title: string, body: string, pauseMs = READ_MS) {
-  await page.evaluate(
-    ({ heading, text }) =>
-      (window as unknown as { demoCaption(a: string, b: string): void }).demoCaption(heading, text),
-    { heading: title, text: body },
-  );
-  await page.waitForTimeout(pauseMs);
-}
+const LINES = {
+  intro:
+    "This is RoofLead, a roofing CRM built on the Travis County Oracle. The map opens on Travis County, and the property, permit and hail data come from the Oracle's published snapshot, queried right here in the browser.",
+  pin: "You can search around a place, a ZIP code, your own location or a dropped pin. Here I drop a pin and set the radius to four miles.",
+  zip: "Or pick a ZIP code. This is 78704, in South Austin.",
+  agedRoofs:
+    "Aged roofs come with their evidence: a completed reroof permit first, then new construction, then the year built, plus the owner and the distance.",
+  openPermits:
+    "Open roofing permits are jobs that never finished. Adding the expired ones that list a contractor brings in archived BBB grades.",
+  permitDetail:
+    "Each permit shows its status, how long it's been open, the contractor and its BBB grade, and the property's owner. One click turns it into a lead.",
+  hail: "Recent hail finds roofs that took NOAA-reported hail of an inch or more within two miles in the last three years, after the roof went on.",
+  topLeads:
+    "Top leads ranks everything with a transparent score: points for roof age, for an unfinished permit, and for recent hail.",
+  bulk: "The columns sort, and I can select several candidates and add them to the pipeline in one step.",
+  assistant:
+    "The assistant answers in plain language. A Workers AI model picks from the same tools the Oracle's MCP server exposes, plus one for your own leads, and every answer shows the rows behind it.",
+  evidence: "Here's the evidence, and any of these rows can become a lead.",
+  answer:
+    "The answer gives the count, lists the long-open permits with their contractors, and spells out its assumptions and gaps.",
+  pipeline:
+    "The pipeline lists every lead with its signals, stage, priority, roof, permit, hail and contractor.",
+  filters:
+    "Filters narrow it down by roof age, by permit status and how long it's been open, or by distance from a place.",
+  manage:
+    "Opening a lead, I can move it to contacted, add notes and set the next action, and every change lands in the activity history.",
+  future:
+    "And the disabled sections show where the CRM goes next: campaigns, estimates, inspections, insurance claims, storm alerts and reports.",
+};
 
 async function show(locator: Locator) {
   await locator.scrollIntoViewIfNeeded();
@@ -70,6 +80,11 @@ async function deleteDemoLeads(page: Page) {
 }
 
 async function record() {
+  const narrator = await Narrator.prepare(Object.values(LINES), NARRATION_CACHE_DIR);
+  const narrate = async (page: Page, line: string) =>
+    page.waitForTimeout(narrator.say(line) + PAUSE_AFTER_LINE_MS);
+  const quickly = <T>(wait: () => Promise<T>) => narrator.cutWaiting(wait);
+
   await rm(OUTPUT_DIR, { recursive: true, force: true });
   await mkdir(OUTPUT_DIR, { recursive: true });
   const browser = await chromium.launch();
@@ -77,181 +92,145 @@ async function record() {
     viewport: VIEWPORT,
     recordVideo: { dir: OUTPUT_DIR, size: VIEWPORT },
   });
-  await context.addInitScript(CAPTION_SCRIPT);
   const page = await context.newPage();
+  narrator.startRecording();
 
-  await page.goto(`${CRM_URL}/#/prospect`);
-  await page.getByText(/Data: Travis County Oracle build/).waitFor({ timeout: DATA_TIMEOUT_MS });
-  await caption(
-    page,
-    "RoofLead CRM, centered on Travis County",
-    "The map opens on the county boundary. Property and permit data come from the published Travis County Oracle dataset, queried in this browser.",
-  );
-  let card = await candidatesLoaded(page);
-  await caption(
-    page,
-    "Search around a place, GPS or a dropped pin",
-    "The default search is 5 miles around Austin. Clicking the map drops a pin; the radius is configurable.",
-  );
+  let card = await quickly(async () => {
+    await page.goto(`${CRM_URL}/#/prospect`);
+    await page.getByText(/Data: Travis County Oracle build/).waitFor({ timeout: DATA_TIMEOUT_MS });
+    return candidatesLoaded(page);
+  });
+  await narrate(page, LINES.intro);
 
   const map = page.getByTestId("prospect-map");
   const box = await map.boundingBox();
-  if (box) await page.mouse.click(box.x + box.width * PIN.x, box.y + box.height * PIN.y);
-  card = await candidatesLoaded(page);
-  await page.getByRole("slider").fill("4");
-  card = await candidatesLoaded(page);
-  await page.waitForTimeout(SETTLE_MS);
-  await caption(
-    page,
-    "Pin dropped, radius set to 4 miles",
-    "Orange points are roofs older than 15 years; purple points are roofing permits that were never finished.",
-    LONG_READ_MS,
-  );
-  await page.getByRole("slider").fill("5");
-  await page.getByLabel("Center on a place").selectOption("Austin");
-  card = await candidatesLoaded(page);
+  card = await quickly(async () => {
+    if (box) await page.mouse.click(box.x + box.width * PIN.x, box.y + box.height * PIN.y);
+    await candidatesLoaded(page);
+    await page.getByRole("slider").fill("4");
+    return candidatesLoaded(page);
+  });
+  await narrate(page, LINES.pin);
+  card = await quickly(async () => {
+    await page.getByRole("slider").fill("5");
+    await page.getByLabel("Center on a place or ZIP code").selectOption(ZIP_CODE);
+    return candidatesLoaded(page);
+  });
+  await narrate(page, LINES.zip);
 
   await show(card);
-  await caption(
-    page,
-    "Roofs older than 15 years",
-    "Best-evidenced first: completed reroof permit, then new construction, then year built, with owner and distance.",
-    LONG_READ_MS,
-  );
-  await card.getByRole("tab", { name: /Open roofing permits/ }).click();
-  card = await candidatesLoaded(page);
+  await narrate(page, LINES.agedRoofs);
+  card = await quickly(async () => {
+    await card.getByRole("tab", { name: /Open roofing permits/ }).click();
+    await page.getByLabel(/Also expired without a final inspection/).check();
+    await page.getByLabel(/Only permits that list a contractor/).check();
+    return candidatesLoaded(page);
+  });
   await show(card);
-  await caption(
-    page,
-    "Still open, longest first",
-    "Roofing permits still open five years or more, with years open and the contractor.",
-    LONG_READ_MS,
-  );
-  await page.getByLabel(/Also expired without a final inspection/).check();
-  await page.getByLabel(/Only permits that list a contractor/).check();
-  card = await candidatesLoaded(page);
-  await show(card);
-  await caption(
-    page,
-    "Never-finished permits with a listed contractor",
-    "Adding permits that expired without a final inspection and keeping those with a listed contractor brings in archived BBB grades.",
-    LONG_READ_MS,
-  );
+  await narrate(page, LINES.openPermits);
 
   const graded = card
     .locator("tbody tr")
     .filter({ has: page.locator(".badge-good") })
     .first();
-  await graded.locator("td").nth(2).click();
   const detail = page.locator(".card").filter({ hasText: "TCAD property" }).last();
-  await detail.getByText("Contractor").first().waitFor({ timeout: DATA_TIMEOUT_MS });
+  await quickly(async () => {
+    await graded.locator("td").nth(3).click();
+    await detail.getByText("Contractor").first().waitFor({ timeout: DATA_TIMEOUT_MS });
+  });
   await show(detail);
-  await caption(
-    page,
-    "Permit, contractor and BBB grade",
-    "Status and open duration, the contractor and its BBB grade as of the archived snapshot, the city record, and the property's owner and roof.",
-    LONG_READ_MS,
-  );
-  await detail.getByRole("button", { name: "Add to leads" }).click();
-  await page.getByRole("status").waitFor({ timeout: DATA_TIMEOUT_MS });
-  await caption(
-    page,
-    "Converted into a lead",
-    "The permit, its property, owner and mailing address become a CRM lead.",
-  );
+  await narrate(page, LINES.permitDetail);
+  await quickly(async () => {
+    await detail.getByRole("button", { name: "Add to leads" }).click();
+    await page.getByRole("status").waitFor({ timeout: DATA_TIMEOUT_MS });
+  });
+
   await show(card);
-  await card.getByRole("tab", { name: /Aged roofs/ }).click();
-  await candidatesLoaded(page);
-  await card.getByRole("button", { name: "+ Lead" }).first().click();
-  await page.getByRole("status").waitFor({ timeout: DATA_TIMEOUT_MS });
-  await caption(
-    page,
-    "One click per candidate",
-    "Aged roofs convert the same way; saved candidates turn green on the map.",
-  );
-
-  await page.goto(`${CRM_URL}/#/assistant`);
-  await page.getByText(/Data: Travis County Oracle build/).waitFor({ timeout: DATA_TIMEOUT_MS });
-  await caption(
-    page,
-    "Assistant",
-    "Ask in plain language. A Workers AI model chooses the query tools; they run over the dataset and your leads.",
-  );
-  await page.getByRole("button", { name: AGENT_QUESTION }).click();
-  await page.locator(".bubble.agent").first().waitFor({ timeout: AGENT_TIMEOUT_MS });
-  await show(page.locator(".evidence").first());
-  await caption(
-    page,
-    "Evidence first",
-    "The rows the answer is based on, with + Lead on each one.",
-  );
-  await page.locator(".evidence").first().getByRole("button", { name: "+ Lead" }).first().click();
+  card = await quickly(async () => {
+    await card.getByRole("tab", { name: /Recent hail/ }).click();
+    return candidatesLoaded(page);
+  });
+  await narrate(page, LINES.hail);
+  card = await quickly(async () => {
+    await card.getByRole("tab", { name: /Top leads/ }).click();
+    return candidatesLoaded(page);
+  });
+  await narrate(page, LINES.topLeads);
+  await card.getByRole("button", { name: "Hail pts", exact: true }).click();
   await page.waitForTimeout(SETTLE_MS);
-  await show(page.locator(".bubble.agent").first());
-  await caption(
-    page,
-    "Grounded answer",
-    "Counts, the long-open permits, contractors and BBB grades, and the assumptions and gaps.",
-    LONG_READ_MS,
-  );
+  const boxes = card.locator("tbody input[type=checkbox]");
+  for (let row = 0; row < BULK_ROWS; row += 1) await boxes.nth(row).check();
+  await narrate(page, LINES.bulk);
+  await quickly(async () => {
+    await card.getByRole("button", { name: `Add ${BULK_ROWS} selected to leads` }).click();
+    await page
+      .getByRole("status")
+      .getByText(/Added \d+ new leads/)
+      .waitFor({
+        timeout: DATA_TIMEOUT_MS,
+      });
+  });
+  await page.waitForTimeout(SETTLE_MS);
 
-  await page.goto(`${CRM_URL}/#/leads`);
-  await page.locator(".data-table tbody tr").first().waitFor({ timeout: DATA_TIMEOUT_MS });
-  await caption(
-    page,
-    "Lead pipeline",
-    "Every lead with its signals, stage, priority, roof, permit, contractor and BBB grade.",
-    LONG_READ_MS,
-  );
+  await quickly(async () => {
+    await page.goto(`${CRM_URL}/#/assistant`);
+    await page.getByText(/Data: Travis County Oracle build/).waitFor({ timeout: DATA_TIMEOUT_MS });
+  });
+  await narrate(page, LINES.assistant);
+  await quickly(async () => {
+    await page.getByRole("button", { name: AGENT_QUESTION }).click();
+    await page.locator(".bubble.agent").first().waitFor({ timeout: AGENT_TIMEOUT_MS });
+  });
+  await show(page.locator(".evidence").first());
+  await narrate(page, LINES.evidence);
+  await show(page.locator(".bubble.agent").first());
+  await narrate(page, LINES.answer);
+
+  await quickly(async () => {
+    await page.goto(`${CRM_URL}/#/leads`);
+    await page.locator(".data-table tbody tr").first().waitFor({ timeout: DATA_TIMEOUT_MS });
+  });
+  await narrate(page, LINES.pipeline);
   await page.getByLabel("Roof age at least").fill("15");
-  await caption(page, "Filter by roof age", "Only leads whose roof is at least 15 years old.");
+  await page.waitForTimeout(SETTLE_MS);
   await page.getByLabel("Roof age at least").fill("");
   await page.getByLabel("Permit status").selectOption("expired");
   await page.getByLabel("Open at least (years)").fill("5");
-  await caption(
-    page,
-    "Filter by permit status and open duration",
-    "Expired-without-final permits open five years or more.",
-  );
+  await narrate(page, LINES.filters);
   await page.getByLabel("Permit status").selectOption("");
   await page.getByLabel("Open at least (years)").fill("");
-  await page.getByLabel("Near").selectOption("Austin");
-  await caption(page, "Filter by distance", "Leads within the chosen radius of a place.");
   await page.locator(".data-table tbody tr").first().locator("td").first().click();
   const lead = page.locator(".lead-detail");
-  await lead.waitFor({ timeout: DATA_TIMEOUT_MS });
-  await page
-    .getByLabel(/Status of/)
-    .first()
-    .selectOption("contacted");
-  await lead
-    .getByRole("textbox")
-    .last()
-    .fill("Called the owner; roof inspection requested for next week.");
-  await page.getByRole("button", { name: "Save notes" }).click();
-  await lead.getByLabel("Next action date").fill("2026-11-03");
-  await page.locator(".timeline").getByText("notes updated").waitFor({ timeout: DATA_TIMEOUT_MS });
+  await quickly(async () => {
+    await lead.waitFor({ timeout: DATA_TIMEOUT_MS });
+    await page
+      .getByLabel(/Status of/)
+      .first()
+      .selectOption("contacted");
+    await lead
+      .getByRole("textbox")
+      .last()
+      .fill("Called the owner; roof inspection requested for next week.");
+    await page.getByRole("button", { name: "Save notes" }).click();
+    await lead.getByLabel("Next action date").fill("2026-11-03");
+    await page
+      .locator(".timeline")
+      .getByText("notes updated")
+      .waitFor({ timeout: DATA_TIMEOUT_MS });
+  });
   await show(page.locator(".card").filter({ has: lead }));
-  await caption(
-    page,
-    "Manage the lead",
-    "Stage, notes and next action, each recorded in the activity history.",
-    LONG_READ_MS,
-  );
+  await narrate(page, LINES.manage);
   await show(page.locator(".future-actions"));
-  await caption(
-    page,
-    "What comes next (disabled)",
-    "Outreach actions and the sidebar's Coming soon sections show where the CRM grows beyond lead identification: campaigns, estimates, inspections, insurance claims, storm alerts and reports.",
-    LONG_READ_MS,
-  );
+  await narrate(page, LINES.future);
 
   await deleteDemoLeads(page);
   const video = page.video();
   await context.close();
   await browser.close();
   const recorded = await video?.path();
-  if (recorded) await rename(recorded, join(OUTPUT_DIR, "crm-demo.webm"));
+  if (!recorded) throw new Error("Playwright did not record a video.");
+  await narrator.mixInto(recorded, join(OUTPUT_DIR, VIDEO_FILE));
+  await rm(recorded);
   console.log(await readdir(OUTPUT_DIR));
 }
 

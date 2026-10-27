@@ -19,6 +19,7 @@ export const TABLES = [
   "permits",
   "businesses",
   "hail_events",
+  "owners",
 ] as const;
 export type TableName = (typeof TABLES)[number];
 
@@ -107,6 +108,7 @@ const YEAR_BUILT_ROOF_DAY = 31;
 const ISO_DATE_LENGTH = "YYYY-MM-DD".length;
 const RELATED_ROWS = 10;
 const MATCHING_CONTRACTORS = 5;
+const MATCHING_OWNERS = 5;
 const DISTANCE_DECIMALS = 2;
 const TOTAL_MATCHES = "total_matches";
 const SUMMARY_PREFIX = "summary__";
@@ -508,6 +510,46 @@ ORDER BY issue_date DESC NULLS LAST, permit_number LIMIT ${RELATED_ROWS}`
   },
 });
 
+const ownerDetails = defineTool({
+  name: "owner_details",
+  description:
+    "Look up an owner entity, reconciled from the TCAD roll by owner name and mailing address, by name or by one of its properties: mailing address, locality, how many properties it holds, their total market value, aged roofs and unfinished roofing permits, and its properties with the oldest roofs first.",
+  input: z.object({
+    name: z.string().min(2).optional().describe("Owner name, or part of it."),
+    prop_id: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("TCAD prop_id of a property the owner holds."),
+  }),
+  run: async (context, input) => {
+    const where =
+      input.prop_id !== undefined
+        ? `owner_key = (SELECT owner_key FROM properties WHERE prop_id = ${input.prop_id})`
+        : input.name !== undefined
+          ? `contains(lower(owner_name), ${literal(input.name.trim().toLowerCase())})`
+          : undefined;
+    if (where === undefined) throw new ToolInputError("Give an owner name or a TCAD prop_id.");
+    const sql = `SELECT * FROM owners WHERE ${where}
+ORDER BY properties DESC, owner_key LIMIT ${MATCHING_OWNERS}`;
+    const rows = await context.sql.all(sql);
+    const best = rows[0]?.owner_key;
+    const relatedSql =
+      typeof best === "string"
+        ? `SELECT prop_id, situs_address, situs_zip, roof_age_years, roof_age_confidence,
+  unfinished_roofing_permits, ownership_years, latitude, longitude
+FROM properties WHERE owner_key = ${literal(best)}
+ORDER BY roof_age_years DESC NULLS LAST, prop_id LIMIT ${RELATED_ROWS}`
+        : undefined;
+    return {
+      rows,
+      related: relatedSql ? await context.sql.all(relatedSql) : [],
+      sql: relatedSql ? `${sql};\n${relatedSql}` : sql,
+    };
+  },
+});
+
 const findLongHeldProperties = defineNearbyTool({
   name: "find_long_held_properties",
   description:
@@ -602,6 +644,7 @@ export const TOOLS = [
   findTopLeads,
   propertyDetails,
   contractorDetails,
+  ownerDetails,
   findLongHeldProperties,
   findOutOfAreaOwners,
   locatePlace,

@@ -59,6 +59,7 @@ const RELATED_COLUMNS = [
 ];
 const DETAIL_FIELDS = [
   "owner_name",
+  "owner_properties",
   "owner_locality",
   "mailing_line1",
   "mailing_city",

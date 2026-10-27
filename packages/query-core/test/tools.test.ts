@@ -29,12 +29,12 @@ beforeAll(async () => {
   const connection = await (await DuckDBInstance.create(":memory:")).connect();
   await connection.run(`
     CREATE TABLE properties AS SELECT * FROM (VALUES
-      (1::BIGINT, '100 NEAR ST', '78701', ${north(1)}, ${CENTER.longitude}, 1990::BIGINT, 'COMPOSITIO', 30, 'year_built', '1996', NULL, 'high', 'NEAR OWNER', 'out_of_state', 'CA', 22, 1::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', 12),
-      (2::BIGINT, '300 YOUNG ST', '78701', ${north(3)}, ${CENTER.longitude}, 2016::BIGINT, 'METAL', 10, 'completed_replacement', strftime(current_date - INTERVAL 6 MONTH, '%Y-%m-%d'), NULL, 'low', 'YOUNG OWNER', 'local', 'TX', 3, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', NULL),
-      (3::BIGINT, '800 FAR ST', '78660', ${north(8)}, ${CENTER.longitude}, 1980::BIGINT, 'COMPOSITIO', 46, 'year_built', '1980', NULL, 'low', 'FAR OWNER', 'regional', 'TX', 30, 0::BIGINT, 'address_point', 'tcad-appraisal-export', 'run-a', NULL),
-      (4::BIGINT, '200 MID ST', '78701', ${north(2)}, ${CENTER.longitude}, 2006::BIGINT, 'COMPOSITIO', 20, 'year_built', '2006', NULL, 'low', 'MID OWNER', 'local', 'TX', 12, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', NULL),
-      (5::BIGINT, '1 NOWHERE', NULL, NULL, NULL, 1970::BIGINT, NULL, 56, 'year_built', '1970', NULL, 'low', 'LOST OWNER', 'local', 'TX', 40, 0::BIGINT, NULL, 'tcad-appraisal-export', 'run-a', NULL)
-    ) AS t(prop_id, situs_address, situs_zip, latitude, longitude, year_built, roof_covering, roof_age_years, roof_age_anchor, roof_age_anchor_date, roof_age_anchor_permit, roof_age_confidence, owner_name, owner_locality, mailing_state, ownership_years, unfinished_roofing_permits, coordinate_source, source, source_run_id, max_years_open);
+      (1::BIGINT, '100 NEAR ST', '78701', ${north(1)}, ${CENTER.longitude}, 1990::BIGINT, 'COMPOSITIO', 30, 'year_built', '1996', NULL, 'high', 'NEAR OWNER', 'out_of_state', 'CA', 22, 1::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', 12, 'k1'),
+      (2::BIGINT, '300 YOUNG ST', '78701', ${north(3)}, ${CENTER.longitude}, 2016::BIGINT, 'METAL', 10, 'completed_replacement', strftime(current_date - INTERVAL 6 MONTH, '%Y-%m-%d'), NULL, 'low', 'YOUNG OWNER', 'local', 'TX', 3, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', NULL, 'k2'),
+      (3::BIGINT, '800 FAR ST', '78660', ${north(8)}, ${CENTER.longitude}, 1980::BIGINT, 'COMPOSITIO', 46, 'year_built', '1980', NULL, 'low', 'FAR OWNER', 'regional', 'TX', 30, 0::BIGINT, 'address_point', 'tcad-appraisal-export', 'run-a', NULL, 'k3'),
+      (4::BIGINT, '200 MID ST', '78701', ${north(2)}, ${CENTER.longitude}, 2006::BIGINT, 'COMPOSITIO', 20, 'year_built', '2006', NULL, 'low', 'MID OWNER', 'local', 'TX', 12, 0::BIGINT, 'parcel_centroid', 'tcad-appraisal-export', 'run-a', NULL, 'k1'),
+      (5::BIGINT, '1 NOWHERE', NULL, NULL, NULL, 1970::BIGINT, NULL, 56, 'year_built', '1970', NULL, 'low', 'LOST OWNER', 'local', 'TX', 40, 0::BIGINT, NULL, 'tcad-appraisal-export', 'run-a', NULL, 'k5')
+    ) AS t(prop_id, situs_address, situs_zip, latitude, longitude, year_built, roof_covering, roof_age_years, roof_age_anchor, roof_age_anchor_date, roof_age_anchor_permit, roof_age_confidence, owner_name, owner_locality, mailing_state, ownership_years, unfinished_roofing_permits, coordinate_source, source, source_run_id, max_years_open, owner_key);
 
     CREATE TABLE roofing_permits AS SELECT * FROM (VALUES
       ('2014-1 BP', '100 NEAR ST', 'expired', 'replacement', true, DATE '2014-03-01', 12, true, DATE '2014-03-01', 'Centec Holdings dba Wilson Roofing', '5125550142', 'wilson roofing', 'A+', 'https://www.bbb.org/x', DATE '2026-07-10', 'high', 1::BIGINT, ${north(1)}, ${CENTER.longitude}, 'https://abc.austintexas.gov/1', 'austin-permits', 'run-p', 'Reroof residence'),
@@ -51,6 +51,11 @@ beforeAll(async () => {
       ('E3', current_date - INTERVAL 6 MONTH, 0.75, ${north(3)}, ${CENTER.longitude}, 'SMALL', 'https://www.ncei.noaa.gov/x?id=E3'),
       ('E4', current_date - INTERVAL 10 YEAR, 2.0, ${north(1)}, ${CENTER.longitude}, 'OLD', 'https://www.ncei.noaa.gov/x?id=E4')
     ) AS t(event_id, event_date, magnitude_inches, latitude, longitude, location, source_url);
+
+    CREATE TABLE owners AS SELECT * FROM (VALUES
+      ('k1', 'NEAR OWNER LLC', 'CA', 2::BIGINT, [1, 4]::BIGINT[]),
+      ('k2', 'YOUNG OWNER', 'TX', 1::BIGINT, [2]::BIGINT[])
+    ) AS t(owner_key, owner_name, mailing_state, properties, prop_ids);
 
     CREATE TABLE contractors AS SELECT * FROM (VALUES
       ('wilson roofing', ['Centec Holdings dba Wilson Roofing'], ['5125550142'], 103::BIGINT, 1::BIGINT, 90::BIGINT, 'A+', 'Wilson Roofing', true, 'https://www.bbb.org/x', DATE '2026-07-10', 'phone', 'medium', 'WR AUSTIN HOLDINGS, LLC', true, 'name', ['A/C Contractor']),
@@ -263,6 +268,25 @@ describe("details", () => {
       registry_active: true,
       license_types: ["A/C Contractor"],
     });
+  });
+});
+
+describe("owner_details", () => {
+  it("finds an owner entity by name with its properties, oldest roofs first", async () => {
+    const result = await run("owner_details", { name: "near owner" });
+
+    expect(result.rows[0]).toMatchObject({ owner_key: "k1", properties: "2" });
+    expect(ids(result.related ?? [], "prop_id")).toEqual(["1", "4"]);
+  });
+
+  it("finds the owner of a property", async () => {
+    const result = await run("owner_details", { prop_id: 4 });
+
+    expect(result.rows[0]).toMatchObject({ owner_name: "NEAR OWNER LLC" });
+  });
+
+  it("needs a name or a property", async () => {
+    await expect(run("owner_details", {})).rejects.toThrow(ToolInputError);
   });
 });
 
