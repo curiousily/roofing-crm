@@ -11,9 +11,8 @@ const SETTLE_MS = 1_500;
 const DATA_TIMEOUT_MS = 120_000;
 const AGENT_TIMEOUT_MS = 180_000;
 const PIN = { x: 0.55, y: 0.5 };
-const ISSUED_SINCE = "2000";
 const AGENT_QUESTION =
-  "Show me open roofing permits older than five years within five miles of Pflugerville.";
+  "Show me open roofing permits older than five years within five miles of Rollingwood.";
 
 const CAPTION_SCRIPT = `
   window.demoCaption = (title, body) => {
@@ -49,7 +48,14 @@ async function show(locator: Locator) {
 
 async function candidatesLoaded(page: Page): Promise<Locator> {
   const card = page.locator(".card").filter({ hasText: "Lead candidates" });
-  await card.getByText(/Showing the first|Nothing matches/).waitFor({ timeout: DATA_TIMEOUT_MS });
+  await card
+    .getByText("Searching the published dataset…")
+    .waitFor({ state: "hidden", timeout: DATA_TIMEOUT_MS });
+  await card
+    .locator("tbody tr")
+    .first()
+    .or(card.getByText("Nothing matches within this radius."))
+    .waitFor({ timeout: DATA_TIMEOUT_MS });
   return card;
 }
 
@@ -113,13 +119,22 @@ async function record() {
     LONG_READ_MS,
   );
   await card.getByRole("tab", { name: /Open roofing permits/ }).click();
-  await page.getByLabel(/Issued in or after/).fill(ISSUED_SINCE);
   card = await candidatesLoaded(page);
   await show(card);
   await caption(
     page,
-    "Open roofing permits, longest open first",
-    `Never-finished roofing permits issued since ${ISSUED_SINCE}, with years open, contractor and archived BBB grade.`,
+    "Still open, longest first",
+    "Roofing permits still open five years or more, with years open and the contractor.",
+    LONG_READ_MS,
+  );
+  await page.getByLabel(/Also expired without a final inspection/).check();
+  await page.getByLabel(/Only permits that list a contractor/).check();
+  card = await candidatesLoaded(page);
+  await show(card);
+  await caption(
+    page,
+    "Never-finished permits with a listed contractor",
+    "Adding permits that expired without a final inspection and keeping those with a listed contractor brings in archived BBB grades.",
     LONG_READ_MS,
   );
 
