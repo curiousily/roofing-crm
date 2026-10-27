@@ -70,7 +70,7 @@ flowchart LR
 ```
 
 - **Data.** The browser loads the latest publication from `/api/publications` and queries its Parquet tables (`properties`, `roofing_permits`, `contractors`, `permits`) with DuckDB-WASM over HTTP range requests on `/ipfs/<root CID>/…`. The Worker forwards these paths over a service binding to the Oracle explorer, which serves them from its R2 mirror or from public IPFS gateways. No database server is involved.
-- **Queries.** [`packages/query-core`](packages/query-core) holds the validated query tools. It is vendored from the pipeline repo (at `30afe41`) as the shared data-model contract. Radius search uses haversine distance with a bounding-box prefilter.
+- **Queries.** [`packages/query-core`](packages/query-core) holds the validated query tools. It is vendored from the pipeline repo (at `e3fd1d7`) as the shared data-model contract. Radius search uses haversine distance with a bounding-box prefilter.
 - **Leads.** Leads live in D1 (`migrations/`).
   - **Workspaces.** Every browser gets its own workspace id, so reviewers do not see or overwrite each other's leads. The sidebar can start a new workspace.
   - **What a lead keeps.** A snapshot of the property and permit facts, the signals that found it, and the dataset root CID and build it came from.
