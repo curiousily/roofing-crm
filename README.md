@@ -10,6 +10,8 @@ It consumes the published [Travis County Oracle](https://github.com/curiousily/o
 
 **Live:** https://roofing-crm.curiousily.workers.dev
 
+**Narrated demo (2:50):** https://www.youtube.com/watch?v=VQP6PSUhu00 · the Oracle pipeline's demo: https://www.youtube.com/watch?v=Qv6aPEK-MOo
+
 The original brief is in [docs/ASSIGNMENT.md](docs/ASSIGNMENT.md).
 
 ## Demo path
