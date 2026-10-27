@@ -1,0 +1,55 @@
+name: deploy
+
+on:
+  push:
+    branches: [travis-crm]
+    paths:
+      - packages/**
+      - package-lock.json
+      - .github/workflows/deploy.yml
+  workflow_dispatch:
+
+concurrency:
+  group: crm-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CRM_URL: https://roofing-crm.curiousily.workers.dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+      - name: Apply database migrations, build and deploy the Worker
+        working-directory: packages/app
+        run: |
+          npx wrangler d1 migrations apply roofing-crm --remote
+          npm run build
+          npx wrangler deploy
+
+      - name: Play through the deployed CRM
+        working-directory: packages/app
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: crm-playthrough
+          path: packages/app/test-results
