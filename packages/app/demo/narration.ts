@@ -45,7 +45,7 @@ const NUMBER_WORDS = [
   "twenty",
 ];
 const AUDIO_BITRATE = "128k";
-const VIDEO_QUALITY = "22";
+const VIDEO_QUALITY = "18";
 
 const exec = promisify(execFile);
 
